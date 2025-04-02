@@ -1,0 +1,169 @@
+name: Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        arch: [x86_64, aarch64]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies (Linux Aarch64)
+        if: matrix.os == 'ubuntu-latest' && matrix.arch == 'aarch64'
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Install target for cross-compilation
+        run: |
+          if [ "${{ matrix.arch }}" == "aarch64" ]; then
+            if [ "${{ matrix.os }}" == "macos-latest" ]; then
+              rustup target add aarch64-apple-darwin
+            elif [ "${{ matrix.os }}" == "windows-latest" ]; then
+              rustup target add aarch64-pc-windows-msvc
+            else
+              rustup target add aarch64-unknown-linux-gnu
+            fi
+          fi
+        shell: bash
+
+      - name: Build binaries
+        run: |
+          if [ "${{ matrix.arch }}" == "x86_64" ]; then
+            cargo build --release
+          else
+            if [ "${{ matrix.os }}" == "macos-latest" ]; then
+              cargo build --release --target aarch64-apple-darwin
+            elif [ "${{ matrix.os }}" == "windows-latest" ]; then
+              cargo build --release --target aarch64-pc-windows-msvc
+            else
+              export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+              cargo build --release --target aarch64-unknown-linux-gnu
+            fi
+          fi
+        shell: bash
+
+      - name: Rename and move binaries
+        run: |
+          BIN_SUFFIX=""
+          if [ "${{ matrix.os }}" == "windows-latest" ]; then
+            BIN_SUFFIX=".exe"
+          fi
+
+          if [ "${{ matrix.arch }}" == "x86_64" ]; then
+            BUILD_DIR="target/release"
+          elif [ "${{ matrix.os }}" == "macos-latest" ]; then
+            BUILD_DIR="target/aarch64-apple-darwin/release"
+          elif [ "${{ matrix.os }}" == "windows-latest" ]; then
+            BUILD_DIR="target/aarch64-pc-windows-msvc/release"
+          else
+            BUILD_DIR="target/aarch64-unknown-linux-gnu/release"
+          fi
+
+          mv $BUILD_DIR/amqs$BIN_SUFFIX amqs-${{ matrix.os }}-${{ matrix.arch }}$BIN_SUFFIX
+          mv $BUILD_DIR/amqc$BIN_SUFFIX amqc-${{ matrix.os }}-${{ matrix.arch }}$BIN_SUFFIX
+        shell: bash
+
+      - name: Generate SHA256 checksums
+        run: |
+          if [ "${{ matrix.os }}" == "macos-latest" ]; then
+            shasum -a 256 amqs-${{ matrix.os }}-${{ matrix.arch }}* > amqs-${{ matrix.os }}-${{ matrix.arch }}.sha256
+            shasum -a 256 amqc-${{ matrix.os }}-${{ matrix.arch }}* > amqc-${{ matrix.os }}-${{ matrix.arch }}.sha256
+          else
+            sha256sum amqs-${{ matrix.os }}-${{ matrix.arch }}* > amqs-${{ matrix.os }}-${{ matrix.arch }}.sha256
+            sha256sum amqc-${{ matrix.os }}-${{ matrix.arch }}* > amqc-${{ matrix.os }}-${{ matrix.arch }}.sha256
+          fi
+        shell: bash
+
+      - name: Package release
+        run: |
+          ARCHIVE_NAME=release-${{ matrix.os }}-${{ matrix.arch }}.tar.gz
+          tar -czvf $ARCHIVE_NAME amqs-${{ matrix.os }}-${{ matrix.arch }}* amqc-${{ matrix.os }}-${{ matrix.arch }}*
+          if [ "${{ matrix.os }}" == "macos-latest" ]; then
+            shasum -a 256 $ARCHIVE_NAME > $ARCHIVE_NAME.sha256
+          else
+            sha256sum $ARCHIVE_NAME > $ARCHIVE_NAME.sha256
+          fi
+        shell: bash
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.os }}-${{ matrix.arch }}
+          path: release-${{ matrix.os }}-${{ matrix.arch }}*
+
+  docker:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+            username: ${{ secrets.DOCKER_HUB_USERNAME }}
+            password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
+      - name: Set up QEMU for multi-arch
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract version from tag
+        id: version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ahriknow/ahrimq:${{ steps.version.outputs.version }}
+            ahriknow/ahrimq:latest
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
+
+  release:
+    needs: [build, docker]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref }}
+          body_path: CHANGELOG.md
+          name: Release ${{ github.ref }}
+          files: release-*/*
+          token: ${{ secrets.GITHUB_TOKEN }}
