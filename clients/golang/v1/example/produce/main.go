@@ -1,7 +1,7 @@
 package main
 
 import (
-	v1 "ahrimq/v1"
+	v1 "github.com/ahriroot/ahrimq/clients/golang/v1"
 )
 
 func main() {
