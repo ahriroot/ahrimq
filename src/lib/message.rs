@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone)]
 pub enum MessageStatus {
     New,
-    Pending(u8, u64),
+    Reconsume,
+    Pending(u8, u64, u64),
     Dead,
     Acked,
 }
@@ -31,6 +32,8 @@ pub enum MsgStatus {
 pub enum Message {
     ReqPing(ReqMsgPing),
     RespPing(RespMsgPing),
+    ReqAuthorizer(ReqMsgAuthorizer),
+    RespAuthorizer(RespMsgAuthorizer),
     ReqSubscribeTopic(ReqMsgSubscriber),
     RespSubscribeTopic(RespMsgSubscriber),
     ReqUnsubscribeTopic(ReqMsgUnsubscriber),
@@ -53,6 +56,8 @@ pub enum Message {
     RespConsume(RespMsgConsume),
     ReqConsumeAck(ReqMsgConsumeAck),
     RespConsumeAck(RespMsgConsumeAck),
+    ReqReconsumeLater(ReqReconsumeLater),
+    RespReconsumeLater(RespReconsumeLater),
     Error(String),
 }
 
@@ -61,6 +66,19 @@ pub struct ReqMsgPing {}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RespMsgPing {}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ReqMsgAuthorizer {
+    pub access_key: String,
+    pub access_secret: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RespMsgAuthorizer {
+    pub id: u64,
+    pub status: MsgStatus,
+    pub msg: String,
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ReqMsgSubscriber {
@@ -209,9 +227,29 @@ pub struct RespMsgConsumeAck {
     pub msg: String,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ReqReconsumeLater {
+    pub id: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RespReconsumeLater {
+    pub id: u64,
+    pub status: MsgStatus,
+    pub msg: String,
+}
+
 impl PartialEq for Message {
     fn eq(&self, _other: &Self) -> bool {
         match (self, _other) {
+            (Message::ReqPing(_), Message::ReqPing(_)) => true,
+            (Message::RespPing(_), Message::RespPing(_)) => true,
+            (Message::ReqAuthorizer(req1), Message::ReqAuthorizer(req2)) => {
+                req1.access_key == req2.access_key && req1.access_secret == req2.access_secret
+            }
+            (Message::RespAuthorizer(resp1), Message::RespAuthorizer(resp2)) => {
+                resp1.id == resp2.id && resp1.status == resp2.status && resp1.msg == resp2.msg
+            }
             (Message::ReqSubscribeTopic(req1), Message::ReqSubscribeTopic(req2)) => {
                 req1.topic == req2.topic
             }
@@ -274,8 +312,18 @@ impl PartialEq for Message {
                     && resp1.msg == resp2.msg
                     && resp1.delay == resp2.delay
             }
+            (Message::ReqConsume(req1), Message::ReqConsume(req2)) => req1.topic == req2.topic,
+            (Message::RespConsume(resp1), Message::RespConsume(resp2)) => {
+                resp1.id == resp2.id && resp1.topic == resp2.topic && resp1.message == resp2.message
+            }
             (Message::ReqConsumeAck(req1), Message::ReqConsumeAck(req2)) => req1.id == req2.id,
             (Message::RespConsumeAck(resp1), Message::RespConsumeAck(resp2)) => {
+                resp1.id == resp2.id && resp1.status == resp2.status && resp1.msg == resp2.msg
+            }
+            (Message::ReqReconsumeLater(req1), Message::ReqReconsumeLater(req2)) => {
+                req1.id == req2.id
+            }
+            (Message::RespReconsumeLater(resp1), Message::RespReconsumeLater(resp2)) => {
                 resp1.id == resp2.id && resp1.status == resp2.status && resp1.msg == resp2.msg
             }
             (Message::Error(err1), Message::Error(err2)) => err1 == err2,

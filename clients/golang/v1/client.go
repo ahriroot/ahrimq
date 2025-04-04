@@ -2,6 +2,7 @@ package v1
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -25,22 +26,71 @@ type Callback func(message []byte) error
 
 func NewAhrimq(config Config) *Ahrimq {
 	return &Ahrimq{
+		config:   config,
 		conn:     nil,
 		Channels: make(map[string]Callback),
 	}
 }
 
 type Ahrimq struct {
+	config   Config
 	conn     net.Conn
 	Channels map[string]Callback
 }
 
 func (a *Ahrimq) Connect(callback ...func(message interface{})) error {
-	conn, err := net.Dial("tcp", "127.0.0.1:60001")
+	addr := net.JoinHostPort(a.config.Host, fmt.Sprintf("%d", a.config.Port))
+	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		return err
 	}
 	a.conn = conn
+
+	req := ReqMsgAuthorizer{
+		AccessKey:    a.config.AccessKey,
+		AccessSecret: a.config.AccessSecret,
+	}
+	messageBytes, err := Serialize(req)
+	if err != nil {
+		return err
+	}
+	if err := binary.Write(a.conn, binary.BigEndian, uint32(len(messageBytes))); err != nil {
+		return err
+	}
+	_, err = a.conn.Write(messageBytes)
+	if err != nil {
+		return err
+	}
+
+	// 设置第一次读取的超时时间为5秒
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+
+	var respLen uint32
+	if err := binary.Read(a.conn, binary.BigEndian, &respLen); err != nil {
+		return err
+	}
+
+	// 3. 读取响应数据
+	message := make([]byte, respLen)
+	if _, err := a.conn.Read(message); err != nil {
+		return err
+	}
+
+	t, msg, err := Deserialize(message)
+	if err != nil {
+		return err
+	}
+
+	if t != TypeRespAuthorizer {
+		return fmt.Errorf("Invalid response type: %s", t)
+	}
+	resp := msg.(RespMsgAuthorizer)
+	if resp.Status != MsgStatusSuccess {
+		return ErrInvalidAccessKeyOrSecret
+	}
+
+	// 之后一直等待数据，设置无超时
+	conn.SetReadDeadline(time.Time{})
 
 	go func() error {
 		for {
@@ -81,7 +131,7 @@ func (a *Ahrimq) Connect(callback ...func(message interface{})) error {
 			}
 			switch t {
 			case TypeRespPing:
-				fmt.Println("RespPing")
+			case TypeRespAuthorizer:
 			case TypeRespSubscribe:
 				resp := msg.(RespMsgSubscribe)
 				if cb, ok := a.Channels[resp.Topic]; ok {
@@ -90,8 +140,8 @@ func (a *Ahrimq) Connect(callback ...func(message interface{})) error {
 						_ = result
 					}()
 				} else {
-					for _, cb := range callback {
-						go cb(msg)
+					for _, cback := range callback {
+						go cback(msg)
 					}
 				}
 			case TypeRespConsume:
@@ -99,16 +149,18 @@ func (a *Ahrimq) Connect(callback ...func(message interface{})) error {
 				if cb, ok := a.Channels[resp.Topic]; ok {
 					go func() {
 						result := cb(resp.Message)
-						_ = result
+						if errors.Is(result, ConsumeAck) {
+							a.Ack(resp.Topic, resp.ID)
+						}
 					}()
 				} else {
-					for _, cb := range callback {
-						go cb(msg)
+					for _, cback := range callback {
+						go cback(msg)
 					}
 				}
 			default:
-				for _, cb := range callback {
-					go cb(msg)
+				for _, cback := range callback {
+					go cback(msg)
 				}
 			}
 		}
@@ -200,6 +252,48 @@ func (a *Ahrimq) Consume(topic string, callback Callback) error {
 		return err
 	}
 	a.Channels[topic] = callback
+	return nil
+}
+
+func (a *Ahrimq) Ack(topic string, messageID uint64) error {
+	if a.conn == nil {
+		return fmt.Errorf("Not connected to server")
+	}
+	message := ReqMsgConsumeAck{
+		ID: messageID,
+	}
+	messageBytes, err := Serialize(message)
+	if err != nil {
+		return err
+	}
+	if err := binary.Write(a.conn, binary.BigEndian, uint32(len(messageBytes))); err != nil {
+		return err
+	}
+	_, err = a.conn.Write(messageBytes)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (a *Ahrimq) Reconsume(topic string, messageID uint64) error {
+	if a.conn == nil {
+		return fmt.Errorf("Not connected to server")
+	}
+	message := ReqReconsumeLater{
+		ID: messageID,
+	}
+	messageBytes, err := Serialize(message)
+	if err != nil {
+		return err
+	}
+	if err := binary.Write(a.conn, binary.BigEndian, uint32(len(messageBytes))); err != nil {
+		return err
+	}
+	_, err = a.conn.Write(messageBytes)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 

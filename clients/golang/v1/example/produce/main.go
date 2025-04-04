@@ -6,11 +6,16 @@ import (
 
 func main() {
 	amq := v1.NewAhrimq(v1.Config{
-		Host: "127.0.0.1",
-		Port: 60001,
+		Host:         "127.0.0.1",
+		Port:         60001,
+		AccessKey:    "your_access_key",
+		AccessSecret: "your_access_secret",
 	})
 
 	err := amq.Connect()
+	if err != nil {
+		panic(err)
+	}
 
 	message := "Hello, world!"
 
@@ -19,13 +24,13 @@ func main() {
 		panic(err)
 	}
 
-	err = amq.ProduceOrdered("ordered", []byte(message))
-	if err != nil {
-		panic(err)
-	}
+	// err = amq.ProduceOrdered("ordered", []byte(message))
+	// if err != nil {
+	// 	panic(err)
+	// }
 
-	err = amq.ProduceDelay("delay", []byte(message), 3)
-	if err != nil {
-		panic(err)
-	}
+	// err = amq.ProduceDelay("delay", []byte(message), 3)
+	// if err != nil {
+	// 	panic(err)
+	// }
 }

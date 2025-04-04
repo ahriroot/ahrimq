@@ -6,13 +6,40 @@
 
 > A high-performance message queue service supporting pub/sub, ordered messages, delayed messages and dead letter queues.
 
-## Install from Crates.io
+## Usage
+
+### Run AhriMQ Server
+
+```bash
+# run with default config
+amqs
+
+# run with config file
+amqs config.toml
+```
+
+#### Configuration
+
+```toml
+host = "127.0.0.1"                   # 服务地址, 默认 127.0.0.1
+port = 60001                         # 端口号, 默认 60001
+access_key = "your_access_key"       # 访问密钥 access_key
+access_secret = "your_access_secret" # 访问密钥 access_secret
+retry_times = 3                      # 消息重新发送次数, 默认 3 次
+retry_interval = 60                  # 消息重新发送间隔 (秒), 默认 60 秒
+```
+
+### Install by downloading binary
+
+Download the latest binary from the [releases page](https://github.com/ahriroot/ahrimq/releases) and copy it to the desired location.
+
+### Install from Crates.io
 
 ```bash
 cargo install ahrimq
 ```
 
-## Install from Source
+### Install from Source
 
 ```bash
 git clone https://github.com/ahriroot/ahrimq.git

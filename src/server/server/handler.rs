@@ -3,7 +3,7 @@ use tokio::{
     net::TcpStream,
 };
 
-use amq::message::{Message, RespMsgPing};
+use amq::message::{Message, MsgStatus, RespMsgAuthorizer, RespMsgPing};
 
 use crate::server::state::State;
 
@@ -19,6 +19,82 @@ pub async fn handler(socket: TcpStream, state: State) {
             let _ = writer.write_all(&message).await;
         }
     });
+
+    loop {
+        // 读取消息头 (4字节)
+        let len = match reader.read_u32().await {
+            Ok(l) => l as usize,
+            Err(_) => {
+                state.cleanup_connection(id).await;
+                return;
+            }
+        };
+        // 读取消息体 (len)
+        let mut buf = vec![0; len];
+        match reader.read(&mut buf).await {
+            Ok(0) => {
+                state.cleanup_connection(id).await;
+                return;
+            }
+            Ok(n) => {
+                let received: Message = Message::deserialize(&buf[..n]).unwrap();
+                match received {
+                    Message::ReqPing(_) => {
+                        let _ = tx
+                            .send(Message::RespPing(RespMsgPing {}).serialize().unwrap())
+                            .await;
+                    }
+                    Message::ReqAuthorizer(req) => {
+                        if req.access_key == state.config.access_key
+                            && req.access_secret == state.config.access_secret
+                        {
+                            let _ = tx
+                                .send(
+                                    Message::RespAuthorizer(RespMsgAuthorizer {
+                                        id: 0,
+                                        status: MsgStatus::Success,
+                                        msg: "authorized".to_string(),
+                                    })
+                                    .serialize()
+                                    .unwrap(),
+                                )
+                                .await;
+                            break;
+                        } else {
+                            let _ = tx
+                                .send(
+                                    Message::RespAuthorizer(RespMsgAuthorizer {
+                                        id: 0,
+                                        status: MsgStatus::Failure,
+                                        msg: "unauthorized".to_string(),
+                                    })
+                                    .serialize()
+                                    .unwrap(),
+                                )
+                                .await;
+                        }
+                    }
+                    _ => {
+                        let _ = tx
+                            .send(
+                                Message::RespAuthorizer(RespMsgAuthorizer {
+                                    id: 0,
+                                    status: MsgStatus::Failure,
+                                    msg: "unauthorized".to_string(),
+                                })
+                                .serialize()
+                                .unwrap(),
+                            )
+                            .await;
+                    }
+                }
+            }
+            Err(_) => {
+                state.cleanup_connection(id).await;
+                return;
+            }
+        }
+    }
 
     loop {
         // 读取消息头 (4字节)
@@ -89,6 +165,9 @@ pub async fn handler(socket: TcpStream, state: State) {
                     // 确认消息被消费
                     Message::ReqConsumeAck(req) => {
                         let _ = tx.send(state.ack_message(req.id).await).await;
+                    }
+                    Message::ReqReconsumeLater(req) => {
+                        let _ = tx.send(state.reconsume_message(req.id).await).await;
                     }
                     _ => {
                         let _ = tx

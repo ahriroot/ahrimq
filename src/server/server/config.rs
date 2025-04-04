@@ -4,13 +4,25 @@ use serde::{Deserialize, Serialize};
 
 use amq::utils::resolve_config_path;
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone)]
 pub struct Config {
     #[serde(default = "default_host")]
-    host: String,
+    pub host: String,
 
     #[serde(default = "default_port")]
-    port: u16,
+    pub port: u16,
+
+    #[serde(default = "default_string")]
+    pub access_key: String,
+
+    #[serde(default = "default_string")]
+    pub access_secret: String,
+
+    #[serde(default = "default_retry_times")]
+    pub retry_times: u8,
+
+    #[serde(default = "default_retry_interval")]
+    pub retry_interval: u64,
 }
 
 fn default_host() -> String {
@@ -18,6 +30,18 @@ fn default_host() -> String {
 }
 fn default_port() -> u16 {
     60001
+}
+
+fn default_string() -> String {
+    "".into()
+}
+
+fn default_retry_times() -> u8 {
+    3
+}
+
+fn default_retry_interval() -> u64 {
+    60
 }
 
 impl Config {
@@ -65,6 +89,10 @@ impl Default for Config {
         Self {
             host: default_host(),
             port: default_port(),
+            access_key: default_string(),
+            access_secret: default_string(),
+            retry_times: default_retry_times(),
+            retry_interval: default_retry_interval(),
         }
     }
 }

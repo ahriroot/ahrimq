@@ -22,7 +22,7 @@ path = "src/server/main.rs"
 
 [[bin]]
 name = "amqc"
-path = "src/client/main.rs"
+path = "src/cli/main.rs"
 
 [lib]
 name = "amq"

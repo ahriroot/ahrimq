@@ -19,6 +19,8 @@ const (
 const (
 	TypeReqPing              = "ReqPing"
 	TypeRespPing             = "RespPing"
+	TypeReqAuthorizer        = "ReqAuthorizer"
+	TypeRespAuthorizer       = "RespAuthorizer"
 	TypeReqSubscribeTopic    = "ReqSubscribeTopic"
 	TypeRespSubscribeTopic   = "RespSubscribeTopic"
 	TypeUnsubscribeTopic     = "UnsubscribeTopic"
@@ -41,6 +43,8 @@ const (
 	TypeRespConsume          = "RespConsume"
 	TypeReqConsumeAck        = "ReqConsumeAck"
 	TypeRespConsumeAck       = "RespConsumeAck"
+	TypeReqReconsumeLater    = "ReqReconsumeLater"
+	TypeRespReconsumeLater   = "RespReconsumeLater"
 	TypeError                = "Error"
 )
 
@@ -70,6 +74,19 @@ type ReqMsgPing struct {
 // RespMsgPing 心跳响应
 type RespMsgPing struct {
 	Msg string `json:"msg"`
+}
+
+// ReqMsgAuthorizer 鉴权请求
+type ReqMsgAuthorizer struct {
+	AccessKey    string `json:"access_key"`
+	AccessSecret string `json:"access_secret"`
+}
+
+// RespMsgAuthorizer 鉴权响应
+type RespMsgAuthorizer struct {
+	ID     uint64    `json:"id"`
+	Status MsgStatus `json:"status"`
+	Msg    string    `json:"msg"`
 }
 
 // ReqMsgSubscriber 订阅请求
@@ -217,6 +234,18 @@ type RespMsgConsumeAck struct {
 	Msg    string    `json:"msg"`
 }
 
+// ReqReconsumeLater 重试消费请求
+type ReqReconsumeLater struct {
+	ID uint64 `json:"id"`
+}
+
+// RespReconsumeLater 重试消费响应
+type RespReconsumeLater struct {
+	ID     uint64    `json:"id"`
+	Status MsgStatus `json:"status"`
+	Msg    string    `json:"msg"`
+}
+
 // SerializeMessage 序列化消息为JSON
 func Serialize(msg interface{}) ([]byte, error) {
 	// 获取消息类型
@@ -226,6 +255,10 @@ func Serialize(msg interface{}) ([]byte, error) {
 		msgType = TypeReqPing
 	case RespMsgPing:
 		msgType = TypeRespPing
+	case ReqMsgAuthorizer:
+		msgType = TypeReqAuthorizer
+	case RespMsgAuthorizer:
+		msgType = TypeRespAuthorizer
 	case ReqMsgSubscriber:
 		msgType = TypeReqSubscribeTopic
 	case RespMsgSubscriber:
@@ -270,6 +303,10 @@ func Serialize(msg interface{}) ([]byte, error) {
 		msgType = TypeReqConsumeAck
 	case RespMsgConsumeAck:
 		msgType = TypeRespConsumeAck
+	case ReqReconsumeLater:
+		msgType = TypeReqReconsumeLater
+	case RespReconsumeLater:
+		msgType = TypeRespReconsumeLater
 	case string: // Error 类型
 		msgType = TypeError
 	default:
@@ -322,6 +359,14 @@ func Deserialize(data []byte) (string, interface{}, error) {
 		var resp RespMsgPing
 		err := json.Unmarshal(msg.Data, &resp)
 		return TypeRespPing, resp, err
+	case TypeReqAuthorizer:
+		var req ReqMsgAuthorizer
+		err := json.Unmarshal(msg.Data, &req)
+		return TypeReqAuthorizer, req, err
+	case TypeRespAuthorizer:
+		var resp RespMsgAuthorizer
+		err := json.Unmarshal(msg.Data, &resp)
+		return TypeRespAuthorizer, resp, err
 	case TypeReqSubscribeTopic:
 		var req ReqMsgSubscriber
 		err := json.Unmarshal(msg.Data, &req)
@@ -410,6 +455,14 @@ func Deserialize(data []byte) (string, interface{}, error) {
 		var resp RespMsgConsumeAck
 		err := json.Unmarshal(msg.Data, &resp)
 		return TypeRespConsumeAck, resp, err
+	case TypeReqReconsumeLater:
+		var req ReqReconsumeLater
+		err := json.Unmarshal(msg.Data, &req)
+		return TypeReqReconsumeLater, req, err
+	case TypeRespReconsumeLater:
+		var resp RespReconsumeLater
+		err := json.Unmarshal(msg.Data, &resp)
+		return TypeRespReconsumeLater, resp, err
 	case TypeError:
 		var errMsg string
 		err := json.Unmarshal(msg.Data, &errMsg)

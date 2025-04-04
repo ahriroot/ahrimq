@@ -11,10 +11,12 @@ pub async fn start() -> Result<(), Box<dyn std::error::Error>> {
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(32);
     let state = State {
+        config: config.clone(),
         next_connection_id: Arc::new(RwLock::new(0)),
         connections: Arc::new(RwLock::new(HashMap::new())),
         subscribers: Arc::new(RwLock::new(HashMap::new())),
         consumers: Arc::new(RwLock::new(HashMap::new())),
+        last_consumers_index: Arc::new(RwLock::new(0)),
         messages: Arc::new(RwLock::new(Vec::new())),
         task_notifier: tx,
         next_message_id: Arc::new(RwLock::new(0)),
@@ -31,9 +33,9 @@ pub async fn start() -> Result<(), Box<dyn std::error::Error>> {
                 for message in messages.iter_mut() {
                     // 处理状态为 0 的延时消息
                     match message.status {
-                        MessageStatus::New => {
+                        MessageStatus::New | MessageStatus::Reconsume => {
                             if message.timestamp <= timestamp {
-                                message.status = MessageStatus::Pending(0, timestamp);
+                                message.status = MessageStatus::Pending(0, timestamp, timestamp);
                                 wati_to_send.push(message.clone());
                             } else {
                                 if message.timestamp < next_timestamp || next_timestamp == timestamp
@@ -42,11 +44,17 @@ pub async fn start() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                         }
-                        MessageStatus::Pending(times, at) => {
-                            if times < 10 || at + 1000 < timestamp {
-                                message.status = MessageStatus::Pending(times + 1, timestamp);
-                            } else {
-                                message.status = MessageStatus::Dead;
+                        MessageStatus::Pending(times, _, first_send) => {
+                            println!("Pending message: {:?} {}", message, timestamp - first_send);
+                            if timestamp - first_send > state.config.retry_interval {
+                                if times >= state.config.retry_times {
+                                    message.status = MessageStatus::Dead;
+                                } else {
+                                    // 重新发送
+                                    message.status =
+                                        MessageStatus::Pending(times + 1, timestamp, first_send);
+                                    wati_to_send.push(message.clone());
+                                }
                             }
                         }
                         MessageStatus::Dead => {}

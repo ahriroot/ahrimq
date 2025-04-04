@@ -11,8 +11,10 @@ import (
 
 func main() {
 	amq := v1.NewAhrimq(v1.Config{
-		Host: "127.0.0.1",
-		Port: 60001,
+		Host:         "127.0.0.1",
+		Port:         60001,
+		AccessKey:    "your_access_key",
+		AccessSecret: "your_access_secret",
 	})
 
 	err := amq.Connect()
@@ -22,7 +24,7 @@ func main() {
 
 	err = amq.Consume("normal", func(message []byte) error {
 		fmt.Printf("Received normal message: %s\n", message)
-		return nil
+		return v1.ConsumeAck
 	})
 	if err != nil {
 		panic(err)

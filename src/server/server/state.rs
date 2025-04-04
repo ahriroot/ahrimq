@@ -14,6 +14,8 @@ use amq::{
     utils,
 };
 
+use super::config::Config;
+
 type ConnectionId = u64;
 type TopicId = String;
 type Connections = Arc<RwLock<HashMap<ConnectionId, (HashSet<TopicId>, HashSet<TopicId>)>>>;
@@ -22,10 +24,12 @@ type Consumers = Arc<RwLock<HashMap<TopicId, Vec<(ConnectionId, Sender<Vec<u8>>)
 type Messages = Arc<RwLock<Vec<MessageBox>>>;
 
 pub struct State {
+    pub config: Config,
     pub next_connection_id: Arc<RwLock<u64>>,
     pub connections: Connections,
     pub subscribers: Subscribers,
     pub consumers: Consumers,
+    pub last_consumers_index: Arc<RwLock<usize>>,
     pub messages: Messages,
     pub task_notifier: Sender<()>,
     pub next_message_id: Arc<RwLock<u64>>,
@@ -34,10 +38,12 @@ pub struct State {
 impl State {
     pub fn clone(&self) -> Self {
         Self {
+            config: self.config.clone(),
             next_connection_id: Arc::clone(&self.next_connection_id),
             connections: Arc::clone(&self.connections),
             subscribers: Arc::clone(&self.subscribers),
             consumers: Arc::clone(&self.consumers),
+            last_consumers_index: Arc::clone(&self.last_consumers_index),
             messages: Arc::clone(&self.messages),
             task_notifier: self.task_notifier.clone(),
             next_message_id: Arc::clone(&self.next_message_id),
@@ -400,9 +406,18 @@ impl State {
             }
         };
         if let Some(txs) = consumers.get(&topic) {
-            if txs.len() > 0 {
-                let _ = txs[0].1.send(message.serialize().unwrap()).await;
+            let mut last_consumers_index = self.last_consumers_index.write().await;
+            let mut current_consumers_index = *last_consumers_index + 1;
+            if current_consumers_index >= txs.len() {
+                *last_consumers_index = 0;
+                current_consumers_index = 0;
+            } else {
+                *last_consumers_index = current_consumers_index;
             }
+            let _ = txs[current_consumers_index]
+                .1
+                .send(message.serialize().unwrap())
+                .await;
         }
     }
 
@@ -415,6 +430,20 @@ impl State {
             id: 1,
             status: MsgStatus::Success,
             msg: "Ack message successfully".to_string(),
+        })
+        .serialize()
+        .unwrap()
+    }
+
+    pub async fn reconsume_message(&self, id: u64) -> Vec<u8> {
+        let mut messages = self.messages.write().await;
+        if let Some(message) = messages.iter_mut().find(|m| m.id == id) {
+            message.status = MessageStatus::Reconsume;
+        }
+        Message::RespConsumeAck(RespMsgConsumeAck {
+            id: 1,
+            status: MsgStatus::Success,
+            msg: "Reconsume message successfully".to_string(),
         })
         .serialize()
         .unwrap()
