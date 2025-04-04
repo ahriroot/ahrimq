@@ -1202,5 +1202,6 @@ $RECYCLE.BIN/
 
 # End of https://www.toptal.com/developers/gitignore/api/windows,linux,macos,vim,visualstudiocode,visualstudio,jetbrains,rust,go,python,node,c,c++,csharp
 
+.python-version
 !/clients/golang/go.mod
 !/src/lib

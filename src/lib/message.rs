@@ -1,8 +1,9 @@
 use std::error::Error;
 
+use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode, PartialEq, Eq)]
 pub enum MessageStatus {
     New,
     Reconsume,
@@ -11,15 +12,22 @@ pub enum MessageStatus {
     Acked,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
+pub struct MessageHistory {
+    pub status: MessageStatus,
+    pub timestamp: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct MessageBox {
     pub id: u64,
     pub status: MessageStatus,
     pub timestamp: u64,
     pub message: Message,
+    pub history: Vec<MessageHistory>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Encode, Decode)]
 pub enum MsgStatus {
     Success,
     Warning,
@@ -27,7 +35,7 @@ pub enum MsgStatus {
     Error,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 #[serde(tag = "type", content = "data")]
 pub enum Message {
     ReqPing(ReqMsgPing),
@@ -59,33 +67,35 @@ pub enum Message {
     ReqReconsumeLater(ReqReconsumeLater),
     RespReconsumeLater(RespReconsumeLater),
     Error(String),
+    ReqMessageList(ReqMsgList),
+    RespMessageList(RespMsgList),
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct ReqMsgPing {}
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct RespMsgPing {}
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct ReqMsgAuthorizer {
     pub access_key: String,
     pub access_secret: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct RespMsgAuthorizer {
     pub id: u64,
     pub status: MsgStatus,
     pub msg: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct ReqMsgSubscriber {
     pub topic: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct RespMsgSubscriber {
     pub id: u64,
     pub status: MsgStatus,
@@ -93,12 +103,12 @@ pub struct RespMsgSubscriber {
     pub msg: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct ReqMsgUnsubscriber {
     pub topic: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct RespMsgUnsubscriber {
     pub id: u64,
     pub status: MsgStatus,
@@ -106,13 +116,13 @@ pub struct RespMsgUnsubscriber {
     pub msg: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct ReqMsgPublish {
     pub topic: String,
     pub message: Vec<u8>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct RespMsgPublish {
     pub id: u64,
     pub status: MsgStatus,
@@ -120,12 +130,12 @@ pub struct RespMsgPublish {
     pub msg: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct ReqMsgSubscribe {
     pub topic: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct RespMsgSubscribe {
     pub id: u64,
     pub status: MsgStatus,
@@ -133,12 +143,12 @@ pub struct RespMsgSubscribe {
     pub message: Vec<u8>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct ReqMsgConsumerTopic {
     pub topic: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct RespMsgConsumerTopic {
     pub id: u64,
     pub status: MsgStatus,
@@ -146,12 +156,12 @@ pub struct RespMsgConsumerTopic {
     pub msg: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct ReqMsgUnconsumerTopic {
     pub topic: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct RespMsgUnconsumerTopic {
     pub id: u64,
     pub status: MsgStatus,
@@ -159,13 +169,13 @@ pub struct RespMsgUnconsumerTopic {
     pub msg: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct ReqMsgProduceNormal {
     pub topic: String,
     pub message: Vec<u8>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct RespMsgProduceNormal {
     pub id: u64,
     pub status: MsgStatus,
@@ -173,13 +183,13 @@ pub struct RespMsgProduceNormal {
     pub msg: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct ReqMsgProduceOrdered {
     pub topic: String,
     pub message: Vec<u8>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct RespMsgProduceOrdered {
     pub id: u64,
     pub status: MsgStatus,
@@ -187,14 +197,14 @@ pub struct RespMsgProduceOrdered {
     pub msg: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct ReqMsgProduceDelay {
     pub topic: String,
     pub message: Vec<u8>,
     pub delay: u64,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct RespMsgProduceDelay {
     pub id: u64,
     pub status: MsgStatus,
@@ -203,40 +213,55 @@ pub struct RespMsgProduceDelay {
     pub delay: u64,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct ReqMsgConsume {
     pub topic: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct RespMsgConsume {
     pub id: u64,
     pub topic: String,
     pub message: Vec<u8>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct ReqMsgConsumeAck {
     pub id: u64,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct RespMsgConsumeAck {
     pub id: u64,
     pub status: MsgStatus,
     pub msg: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct ReqReconsumeLater {
     pub id: u64,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct RespReconsumeLater {
     pub id: u64,
     pub status: MsgStatus,
     pub msg: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
+pub struct ReqMsgList {
+    pub topic: String,
+    pub page_size: u32,
+    pub page_num: u32,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
+pub struct RespMsgList {
+    pub id: u64,
+    pub status: MsgStatus,
+    pub topic: String,
+    pub message_list: Vec<MessageBox>,
 }
 
 impl PartialEq for Message {

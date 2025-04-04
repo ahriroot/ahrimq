@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=64.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ahrimq"
+version = "0.0.1"
+authors = [{ name = "ahriknow", email = "ahriknow@ahriknow.com" }]
+description = "A high-performance message queue service supporting pub/sub, normal messages, ordered messages, delayed messages and dead letter queues."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Distributed Computing",
+]
+keywords = ["ahrimq", "mq", "message-queue", "pubsub"]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/ahriroot/ahrimq/clients/python"
+Documentation = "https://github.com/ahriroot/ahrimq"
+BugTracker = "https://github.com/ahriroot/ahrimq/issues"

@@ -7,9 +7,10 @@ use tokio::sync::{mpsc::Sender, RwLock};
 
 use amq::{
     message::{
-        Message, MessageBox, MessageStatus, MsgStatus, RespMsgConsume, RespMsgConsumeAck,
-        RespMsgConsumerTopic, RespMsgProduceDelay, RespMsgProduceNormal, RespMsgPublish,
-        RespMsgSubscribe, RespMsgSubscriber, RespMsgUnconsumerTopic, RespMsgUnsubscriber,
+        Message, MessageBox, MessageHistory, MessageStatus, MsgStatus, RespMsgConsume,
+        RespMsgConsumeAck, RespMsgConsumerTopic, RespMsgProduceDelay, RespMsgProduceNormal,
+        RespMsgPublish, RespMsgSubscribe, RespMsgSubscriber, RespMsgUnconsumerTopic,
+        RespMsgUnsubscriber,
     },
     utils,
 };
@@ -331,6 +332,10 @@ impl State {
                     topic: topic.clone(),
                     message: message.clone(),
                 }),
+                history: vec![MessageHistory {
+                    status: MessageStatus::New,
+                    timestamp: utils::get_unix_timestamp(),
+                }],
             });
         }
         self.task_notifier.send(()).await.unwrap();
@@ -357,6 +362,10 @@ impl State {
                     topic: topic.clone(),
                     message: message.clone(),
                 }),
+                history: vec![MessageHistory {
+                    status: MessageStatus::New,
+                    timestamp: utils::get_unix_timestamp(),
+                }],
             });
         }
         self.task_notifier.send(()).await.unwrap();
@@ -383,6 +392,10 @@ impl State {
                     topic: topic.clone(),
                     message: message.clone(),
                 }),
+                history: vec![MessageHistory {
+                    status: MessageStatus::New,
+                    timestamp: utils::get_unix_timestamp(),
+                }],
             });
         }
         self.task_notifier.send(()).await.unwrap();

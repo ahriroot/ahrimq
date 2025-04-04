@@ -2,17 +2,18 @@
 name = "ahrimq"
 version = "0.0.1"
 edition = "2021"
+rust-version = "1.85"
 authors = ["ahriknow <ahriknow@ahriknow.com>"]
-description = "A high-performance message queue service supporting pub/sub, ordered messages, delayed messages and dead letter queues."
+description = "A high-performance message queue service supporting pub/sub, normal messages, ordered messages, delayed messages and dead letter queues."
 license = "MIT"
 repository = "https://github.com/ahriroot/ahrimq"
 documentation = "https://github.com/ahriroot/ahrimq"
 readme = "README.md"
 keywords = [
-    "message-queue",
+    "ahrimq",
     "mq",
+    "message-queue",
     "pubsub",
-    "distributed",
 ]
 categories = ["asynchronous", "network-programming", "database-implementations"]
 
@@ -29,6 +30,7 @@ name = "amq"
 path = "src/lib/mod.rs"
 
 [dependencies]
+bincode = { version = "2", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
