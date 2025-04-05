@@ -32,7 +32,7 @@ func main() {
 
 	err = amq.Consume("ordered", func(message []byte) error {
 		fmt.Printf("Received ordered message: %s\n", message)
-		return nil
+		return v1.ConsumeAck
 	})
 	if err != nil {
 		panic(err)
@@ -40,7 +40,7 @@ func main() {
 
 	err = amq.Consume("delay", func(message []byte) error {
 		fmt.Printf("Received delay message: %s\n", message)
-		return nil
+		return v1.ConsumeAck
 	})
 	if err != nil {
 		panic(err)

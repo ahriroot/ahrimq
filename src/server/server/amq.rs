@@ -3,17 +3,18 @@ use std::{collections::HashMap, env, ffi::OsString, path::Path, sync::Arc};
 use bincode::config::standard;
 use tokio::{fs, net::TcpListener, signal, sync::RwLock};
 
-use amq::{
-    message::{MessageBox, MessageStatus},
-    utils,
-};
+use amq::message::{MessageBox, MessageStatus};
 
-use crate::server::{config, handler::handler, state::State};
+use crate::server::{
+    config,
+    handler::handler,
+    state::{interval, State},
+};
 
 pub async fn start() -> Result<(), Box<dyn std::error::Error>> {
     let config = config::Config::new().unwrap();
 
-    let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+    let (tx, rx) = tokio::sync::mpsc::channel(32);
     let mut state = State {
         config: config.clone(),
         next_connection_id: Arc::new(RwLock::new(0)),
@@ -33,66 +34,7 @@ pub async fn start() -> Result<(), Box<dyn std::error::Error>> {
         stop(sstop).await;
     });
 
-    let st = state.clone();
-    tokio::spawn(async move {
-        loop {
-            let timestamp = utils::get_unix_timestamp();
-            let mut next_timestamp = timestamp;
-            let mut wati_to_send = Vec::new();
-            let mut wati_to_ack = Vec::new();
-            {
-                let mut messages = st.messages.write().await;
-                for message in messages.iter_mut() {
-                    // 处理状态为 0 的延时消息
-                    match message.status {
-                        MessageStatus::New | MessageStatus::Reconsume => {
-                            if message.timestamp <= timestamp {
-                                message.status = MessageStatus::Pending(0, timestamp, timestamp);
-                                wati_to_send.push(message.clone());
-                            } else {
-                                if message.timestamp < next_timestamp || next_timestamp == timestamp
-                                {
-                                    next_timestamp = message.timestamp;
-                                }
-                            }
-                        }
-                        MessageStatus::Pending(times, _, first_send) => {
-                            if timestamp - first_send > state.config.retry_interval {
-                                if times >= state.config.retry_times {
-                                    message.status = MessageStatus::Dead;
-                                } else {
-                                    // 重新发送
-                                    message.status =
-                                        MessageStatus::Pending(times + 1, timestamp, first_send);
-                                    wati_to_send.push(message.clone());
-                                }
-                            }
-                        }
-                        MessageStatus::Dead => {}
-                        MessageStatus::Acked => {
-                            // 已经被确认过了
-                            wati_to_ack.push(message.id);
-                        }
-                    }
-                }
-                for message in wati_to_send {
-                    st.consume(message.message).await;
-                }
-                for id in wati_to_ack {
-                    messages.retain(|m| m.id != id);
-                }
-            }
-            tokio::select! {
-                _ = tokio::time::sleep(tokio::time::Duration::from_secs(next_timestamp - timestamp + 1)) => {
-                    // 等到下个消息到期时间
-                }
-                _ = rx.recv() => {
-                    // 有新的消息
-                    continue;
-                }
-            }
-        }
-    });
+    interval(state.clone(), rx).await;
 
     let addr = config.get_address();
     let listener = TcpListener::bind(&addr).await?;

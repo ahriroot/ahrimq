@@ -3,14 +3,14 @@ use std::{
     sync::Arc,
 };
 
-use tokio::sync::{mpsc::Sender, RwLock};
+use tokio::sync::{mpsc::{self, Sender}, RwLock};
 
 use amq::{
     message::{
         Message, MessageBox, MessageHistory, MessageStatus, MsgStatus, RespMsgConsume,
         RespMsgConsumeAck, RespMsgConsumerTopic, RespMsgProduceDelay, RespMsgProduceNormal,
         RespMsgPublish, RespMsgSubscribe, RespMsgSubscriber, RespMsgUnconsumerTopic,
-        RespMsgUnsubscriber,
+        RespMsgUnsubscriber, RespReconsumeLater,
     },
     utils,
 };
@@ -453,7 +453,7 @@ impl State {
         if let Some(message) = messages.iter_mut().find(|m| m.id == id) {
             message.status = MessageStatus::Reconsume;
         }
-        Message::RespConsumeAck(RespMsgConsumeAck {
+        Message::RespReconsumeLater(RespReconsumeLater {
             id: 1,
             status: MsgStatus::Success,
             msg: "Reconsume message successfully".to_string(),
@@ -461,4 +461,75 @@ impl State {
         .serialize()
         .unwrap()
     }
+}
+
+pub async fn interval(state: State, mut rx: mpsc::Receiver<()>) {
+    tokio::spawn(async move {
+        loop {
+            let timestamp = utils::get_unix_timestamp();
+            let mut next_timestamp = timestamp;
+            let mut wati_to_send = Vec::new();
+            let mut wati_to_ack = Vec::new();
+            {
+                let mut messages = state.messages.write().await;
+                if messages.len() == 0 {
+                    next_timestamp = timestamp + 10;
+                }
+                for message in messages.iter_mut() {
+                    match message.status {
+                        // 新消息 或 重试消费
+                        MessageStatus::New | MessageStatus::Reconsume => {
+                            if message.timestamp <= timestamp {
+                                message.status = MessageStatus::Pending(0, timestamp, timestamp);
+                                wati_to_send.push(message.clone());
+                            } else {
+                                // 查询最近的下个消息到达时间
+                                if message.timestamp < next_timestamp || next_timestamp == timestamp
+                                {
+                                    next_timestamp = message.timestamp;
+                                }
+                            }
+                        }
+                        // 处理中消息
+                        MessageStatus::Pending(times, _, first_send) => {
+                            let interval = state.config.retry_interval * (times as u64 + 1);
+                            // 超时未收到确认
+                            if timestamp - first_send >= interval {
+                                if times >= state.config.retry_times {
+                                    // 重试次数超限
+                                    message.status = MessageStatus::Dead;
+                                } else {
+                                    // 重新发送
+                                    message.status =
+                                        MessageStatus::Pending(times + 1, timestamp, first_send);
+                                    wati_to_send.push(message.clone());
+                                }
+                            }
+                        }
+                        // 死亡消息
+                        MessageStatus::Dead => {}
+                        // 已确认消费的消息
+                        MessageStatus::Acked => {
+                            wati_to_ack.push(message.id);
+                        }
+                    }
+                }
+                for message in wati_to_send {
+                    state.consume(message.message).await;
+                }
+                for id in wati_to_ack {
+                    messages.retain(|m| m.id != id);
+                }
+            }
+            tokio::select! {
+                _ = tokio::time::sleep(tokio::time::Duration::from_secs(next_timestamp - timestamp + 1)) => {
+                    // 等到下个消息到期时间
+                }
+                _ = rx.recv() => {
+                    // 有新的消息
+                    continue;
+                }
+            }
+        }
+    });
 }

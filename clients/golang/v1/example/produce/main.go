@@ -17,20 +17,18 @@ func main() {
 		panic(err)
 	}
 
-	message := "Hello, world!"
-
-	err = amq.ProduceNormal("normal", []byte(message))
+	err = amq.ProduceNormal("normal", []byte("normal message"))
 	if err != nil {
 		panic(err)
 	}
 
-	// err = amq.ProduceOrdered("ordered", []byte(message))
-	// if err != nil {
-	// 	panic(err)
-	// }
+	err = amq.ProduceOrdered("ordered", []byte("ordered message"))
+	if err != nil {
+		panic(err)
+	}
 
-	// err = amq.ProduceDelay("delay", []byte(message), 3)
-	// if err != nil {
-	// 	panic(err)
-	// }
+	err = amq.ProduceDelay("delay", []byte("delay message"), 3)
+	if err != nil {
+		panic(err)
+	}
 }
