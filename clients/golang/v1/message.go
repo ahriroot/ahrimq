@@ -23,7 +23,7 @@ const (
 	TypeRespAuthorizer       = "RespAuthorizer"
 	TypeReqSubscribeTopic    = "ReqSubscribeTopic"
 	TypeRespSubscribeTopic   = "RespSubscribeTopic"
-	TypeUnsubscribeTopic     = "UnsubscribeTopic"
+	TypeReqUnsubscribeTopic  = "ReqUnsubscribeTopic"
 	TypeRespUnsubscribeTopic = "RespUnsubscribeTopic"
 	TypeReqPublish           = "ReqPublish"
 	TypeRespPublish          = "RespPublish"
@@ -264,7 +264,7 @@ func Serialize(msg interface{}) ([]byte, error) {
 	case RespMsgSubscriber:
 		msgType = TypeRespSubscribeTopic
 	case ReqMsgUnsubscriber:
-		msgType = TypeUnsubscribeTopic
+		msgType = TypeReqUnsubscribeTopic
 	case RespMsgUnsubscriber:
 		msgType = TypeRespUnsubscribeTopic
 	case ReqMsgPublish:
@@ -375,10 +375,10 @@ func Deserialize(data []byte) (string, interface{}, error) {
 		var resp RespMsgSubscriber
 		err := json.Unmarshal(msg.Data, &resp)
 		return TypeRespSubscribeTopic, resp, err
-	case TypeUnsubscribeTopic:
+	case TypeReqUnsubscribeTopic:
 		var req ReqMsgUnsubscriber
 		err := json.Unmarshal(msg.Data, &req)
-		return TypeUnsubscribeTopic, req, err
+		return TypeReqUnsubscribeTopic, req, err
 	case TypeRespUnsubscribeTopic:
 		var resp RespMsgUnsubscriber
 		err := json.Unmarshal(msg.Data, &resp)

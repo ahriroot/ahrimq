@@ -131,7 +131,6 @@ func (a *Ahrimq) Connect(callback ...func(message interface{})) error {
 			}
 			switch t {
 			case TypeRespPing:
-			case TypeRespAuthorizer:
 			case TypeRespSubscribe:
 				resp := msg.(RespMsgSubscribe)
 				if cb, ok := a.Channels[resp.Topic]; ok {
