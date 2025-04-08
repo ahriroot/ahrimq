@@ -1,5 +1,5 @@
 # ===== 构建阶段 =====
-FROM rust:1.75-alpine AS builder
+FROM rust:1.85-alpine AS builder
 
 # 安装 musl 编译工具链
 RUN apk add --no-cache musl-dev
