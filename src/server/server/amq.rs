@@ -1,7 +1,12 @@
 use std::{collections::HashMap, env, ffi::OsString, path::Path, sync::Arc};
 
 use bincode::config::standard;
-use tokio::{fs, net::TcpListener, signal, sync::RwLock};
+use tokio::{
+    fs,
+    net::TcpListener,
+    signal::unix::{signal, SignalKind},
+    sync::RwLock,
+};
 
 use amq::message::{MessageBox, MessageStatus};
 
@@ -74,7 +79,18 @@ async fn stop(state: State) {
     let config = standard().with_variable_int_encoding().with_little_endian();
 
     // 1. 监听终止信号
-    signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
+    let mut sigint = signal(SignalKind::interrupt()).unwrap();
+    let mut sigterm = signal(SignalKind::terminate()).unwrap();
+
+    // 阻塞等待任意信号
+    tokio::select! {
+        _ = sigint.recv() => {
+            println!("Received SIGINT (Ctrl+C)");
+        },
+        _ = sigterm.recv() => {
+            println!("Received SIGTERM (systemctl stop)");
+        },
+    }
 
     // 2. 保存数据到文件
     let home_dir = env::var_os("HOME")
