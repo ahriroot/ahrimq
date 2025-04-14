@@ -7,7 +7,10 @@ use tokio::{
 };
 
 #[cfg(windows)]
-use tokio::signal::windows::{ctrl_break, ctrl_c};
+use tokio::{
+    signal::windows::{ctrl_break, ctrl_c},
+    sync::oneshot,
+};
 
 use server::amq::start;
 
