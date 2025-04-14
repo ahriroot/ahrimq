@@ -4,8 +4,7 @@ use bincode::config::standard;
 use tokio::{
     fs,
     net::TcpListener,
-    signal::unix::{signal, SignalKind},
-    sync::RwLock,
+    sync::{oneshot, RwLock},
 };
 
 use amq::message::{MessageBox, MessageStatus};
@@ -16,7 +15,9 @@ use crate::server::{
     state::{interval, State},
 };
 
-pub async fn start() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn start(
+    shutdown_receiver: oneshot::Receiver<()>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let config = config::Config::new().unwrap();
 
     let (tx, rx) = tokio::sync::mpsc::channel(32);
@@ -36,7 +37,7 @@ pub async fn start() -> Result<(), Box<dyn std::error::Error>> {
 
     let sstop = state.clone();
     tokio::spawn(async move {
-        stop(sstop).await;
+        stop(sstop, shutdown_receiver).await;
     });
 
     interval(state.clone(), rx).await;
@@ -75,24 +76,9 @@ async fn read_cache_file(state: &mut State) {
     }
 }
 
-async fn stop(state: State) {
-    let config = standard().with_variable_int_encoding().with_little_endian();
+async fn stop(state: State, shutdown_receiver: oneshot::Receiver<()>) {
+    let _ = shutdown_receiver.await;
 
-    // 1. 监听终止信号
-    let mut sigint = signal(SignalKind::interrupt()).unwrap();
-    let mut sigterm = signal(SignalKind::terminate()).unwrap();
-
-    // 阻塞等待任意信号
-    tokio::select! {
-        _ = sigint.recv() => {
-            println!("Received SIGINT (Ctrl+C)");
-        },
-        _ = sigterm.recv() => {
-            println!("Received SIGTERM (systemctl stop)");
-        },
-    }
-
-    // 2. 保存数据到文件
     let home_dir = env::var_os("HOME")
         .or_else(|| env::var_os("USERPROFILE")) // Windows 兼容
         .unwrap_or(OsString::from("./"));
@@ -103,6 +89,7 @@ async fn stop(state: State) {
 
     let cache_file = cache_dir.join("cache.akv");
     let messages = state.messages.read().await.clone();
+    let config = standard().with_variable_int_encoding().with_little_endian();
     let encoded = bincode::encode_to_vec(&messages, config).unwrap();
     fs::write(cache_file, encoded)
         .await
