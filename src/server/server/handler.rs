@@ -1,16 +1,16 @@
-use tokio::{
-    io::{self, AsyncReadExt as _, AsyncWriteExt as _},
-    net::TcpStream,
-};
+use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
 use amq::message::{Message, MsgStatus, RespMsgAuthorizer, RespMsgPing};
 
 use crate::server::state::State;
 
-pub async fn handler(socket: TcpStream, state: State) {
+pub async fn handler<R, W>(mut reader: R, mut writer: W, state: State)
+where
+    R: AsyncRead + Unpin + Send + 'static,
+    W: AsyncWrite + Unpin + Send + 'static,
+{
     let id = state.get_connection_id().await;
 
-    let (mut reader, mut writer) = io::split(socket);
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(10);
 
     tokio::spawn(async move {

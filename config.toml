@@ -1,6 +1,7 @@
+path = "/tmp/ahrimq.sock"            # 服务端 unix socket 文件路径 (仅支持类 unix 系统), 与 host, port 互斥, 默认 "" 使用 host, port
 host = "127.0.0.1"                   # 服务地址, 默认 127.0.0.1
 port = 60002                         # 端口号, 默认 60001
-access_key = "your_access_key"       # 访问密钥 access_key
-access_secret = "your_access_secret" # 访问密钥 access_secret
+access_key = "your_access_key"       # 访问密钥 access_key, 默认 ""
+access_secret = "your_access_secret" # 访问密钥 access_secret, 默认 ""
 retry_times = 3                      # 消息重新发送次数, 默认 3 次
 retry_interval = 60                  # 消息重新发送间隔 (秒), 默认 60 秒

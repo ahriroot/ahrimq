@@ -1,11 +1,14 @@
-use std::{env, error::Error};
+use std::{env, error::Error, ffi::OsString, path::Path};
 
 use serde::{Deserialize, Serialize};
 
-use amq::utils::resolve_config_path;
+use amq::utils::{normalize_path, resolve_config_path};
 
 #[derive(Deserialize, Serialize, Clone)]
 pub struct Config {
+    #[serde(default = "default_string")]
+    pub path: String,
+
     #[serde(default = "default_host")]
     pub host: String,
 
@@ -82,11 +85,31 @@ impl Config {
     pub fn get_address(&self) -> String {
         format!("{}:{}", self.host, self.port)
     }
+
+    #[cfg(unix)]
+    pub fn get_unix_path(&self) -> String {
+        let path = self.path.trim();
+        if path.starts_with("./") {
+            let current_dir = env::current_dir().unwrap();
+            let abs_path = current_dir.join(path);
+            let abs_path = normalize_path(&abs_path);
+            abs_path.to_str().unwrap().to_string()
+        } else if path.starts_with("~") {
+            let home_dir = env::var_os("HOME")
+                .or_else(|| env::var_os("USERPROFILE")) // Windows 兼容
+                .unwrap_or(OsString::from("./"));
+            let abs_path = Path::new(&home_dir).join(path.trim_start_matches("~/"));
+            abs_path.to_str().unwrap().to_string()
+        } else {
+            path.to_string()
+        }
+    }
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
+            path: default_string(),
             host: default_host(),
             port: default_port(),
             access_key: default_string(),

@@ -9,9 +9,11 @@ import (
 
 func main() {
 	amq, err := v1.NewAhrimq(v1.Config{
-		Host: "127.0.0.1",
-		Port: 60001,
-		Mode: v1.Passive,
+		Path: "/tmp/ahrimq.sock",
+		// Host: "127.0.0.1",
+		// Port: 60001,
+		AccessKey:    "your_access_key",
+		AccessSecret: "your_access_secret",
 	})
 	if err != nil {
 		panic(err)

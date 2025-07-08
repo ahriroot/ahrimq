@@ -1205,3 +1205,4 @@ $RECYCLE.BIN/
 .python-version
 !/clients/golang/go.mod
 !/src/lib
+ahrimq.sock

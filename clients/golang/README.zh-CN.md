@@ -47,6 +47,10 @@ cd ahrimq
 cargo build --release
 ```
 
+### SDK
+
+- [Golang](./clients/golang/v1/example)
+
 ## 特性
 
 - 发布/订阅：支持发布和订阅消息。

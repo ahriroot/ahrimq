@@ -7,6 +7,9 @@ use tokio::{
     sync::{oneshot, RwLock},
 };
 
+#[cfg(unix)]
+use tokio::net::UnixListener;
+
 use amq::message::{MessageBox, MessageStatus};
 
 use crate::server::{
@@ -42,17 +45,41 @@ pub async fn start(
 
     interval(state.clone(), rx).await;
 
-    let addr = config.get_address();
-    let listener = TcpListener::bind(&addr).await?;
-    println!("Server running on {}", addr);
+    #[cfg(unix)]
+    let path = config.get_unix_path();
 
-    loop {
-        let (socket, _) = listener.accept().await?;
-        let s = state.clone();
-        tokio::spawn(async move {
-            handler(socket, s).await;
-        });
-    }
+    if path.is_empty() {
+        let addr = config.get_address();
+        let listener = TcpListener::bind(&addr).await?;
+        println!("Server running on {}", addr);
+
+        loop {
+            let (socket, _) = listener.accept().await?;
+            let s = state.clone();
+            let (reader, writer) = socket.into_split();
+            tokio::spawn(async move {
+                handler(reader, writer, s).await;
+            });
+        }
+    } else {
+        #[cfg(unix)]
+        {
+            if Path::new(&path).exists() {
+                std::fs::remove_file(&path)?;
+            }
+            let listener = UnixListener::bind(&path)?;
+            println!("Unix socket server listening on {}", path);
+
+            loop {
+                let (socket, _) = listener.accept().await?;
+                let s = state.clone();
+                let (reader, writer) = socket.into_split();
+                tokio::spawn(async move {
+                    handler(reader, writer, s).await;
+                });
+            }
+        }
+    };
 }
 
 async fn read_cache_file(state: &mut State) {

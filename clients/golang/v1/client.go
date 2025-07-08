@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"runtime"
 	"time"
 )
 
@@ -26,7 +27,7 @@ type Callback func(message []byte) error
 
 func NewAhrimq(config Config) (*Ahrimq, error) {
 	if config.Mode != Active && config.Mode != Passive {
-		return nil, fmt.Errorf("Invalid mode: %s", config.Mode)
+		config.Mode = Active
 	}
 	client := &Ahrimq{
 		config:   config,
@@ -45,12 +46,24 @@ type Ahrimq struct {
 }
 
 func (a *Ahrimq) Connect(callback ...func(message interface{})) error {
-	addr := net.JoinHostPort(a.config.Host, fmt.Sprintf("%d", a.config.Port))
-	conn, err := net.Dial("tcp", addr)
-	if err != nil {
-		return err
+	path := a.config.GetUnixPath()
+	if path == "" {
+		addr := a.config.GetAddress()
+		conn, err := net.Dial("tcp", addr)
+		if err != nil {
+			return err
+		}
+		a.conn = conn
+	} else {
+		if runtime.GOOS == "windows" {
+			return fmt.Errorf("Unix socket not supported on Windows")
+		}
+		conn, err := net.Dial("unix", path)
+		if err != nil {
+			return err
+		}
+		a.conn = conn
 	}
-	a.conn = conn
 
 	req := ReqMsgAuthorizer{
 		AccessKey:    a.config.AccessKey,
@@ -69,7 +82,7 @@ func (a *Ahrimq) Connect(callback ...func(message interface{})) error {
 	}
 
 	// 设置第一次读取的超时时间为5秒
-	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	a.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 
 	var respLen uint32
 	if err := binary.Read(a.conn, binary.BigEndian, &respLen); err != nil {
@@ -96,7 +109,7 @@ func (a *Ahrimq) Connect(callback ...func(message interface{})) error {
 	}
 
 	// 之后一直等待数据，设置无超时
-	conn.SetReadDeadline(time.Time{})
+	a.conn.SetReadDeadline(time.Time{})
 
 	if a.config.PingInterval < time.Second*5 {
 		a.config.PingInterval = time.Second * 5
@@ -124,14 +137,14 @@ func (a *Ahrimq) Connect(callback ...func(message interface{})) error {
 	go func() {
 		for {
 			var respLen uint32
-			if err := binary.Read(conn, binary.BigEndian, &respLen); err != nil {
+			if err := binary.Read(a.conn, binary.BigEndian, &respLen); err != nil {
 				fmt.Println("Read error: ", err)
 				log.Fatal("Read length error: ", err)
 			}
 
 			// 3. 读取响应数据
 			message := make([]byte, respLen)
-			if _, err := conn.Read(message); err != nil {
+			if _, err := a.conn.Read(message); err != nil {
 				log.Fatal("Read data error: ", err)
 			}
 
