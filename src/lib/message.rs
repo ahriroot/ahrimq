@@ -12,6 +12,15 @@ pub enum MessageStatus {
     Acked,
 }
 
+impl MessageStatus {
+    pub fn is_pending(&self) -> bool {
+        match self {
+            MessageStatus::Pending(_, _, _) => true,
+            _ => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct MessageHistory {
     pub status: MessageStatus,
@@ -54,6 +63,8 @@ pub enum Message {
     RespConsumerTopic(RespMsgConsumerTopic),
     ReqUnconsumerTopic(ReqMsgUnconsumerTopic),
     RespUnconsumerTopic(RespMsgUnconsumerTopic),
+    ReqPullMessage(ReqPullMessage),
+    RespPullMessage(RespPullMessage),
     ReqProduceNormal(ReqMsgProduceNormal),
     ReqProduceOrdered(ReqMsgProduceOrdered),
     ReqProduceDelay(ReqMsgProduceDelay),
@@ -64,6 +75,8 @@ pub enum Message {
     RespConsume(RespMsgConsume),
     ReqConsumeAck(ReqMsgConsumeAck),
     RespConsumeAck(RespMsgConsumeAck),
+    ReqConsumeAckMulti(ReqMsgConsumeAckMulti),
+    RespConsumeAckMulti(RespMsgConsumeAckMulti),
     ReqReconsumeLater(ReqReconsumeLater),
     RespReconsumeLater(RespReconsumeLater),
     Error(String),
@@ -170,6 +183,24 @@ pub struct RespMsgUnconsumerTopic {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
+pub struct ReqPullMessage {
+    pub topic: String,
+    pub total: u32,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
+pub struct RespPullMsg {
+    pub id: u64,
+    pub message: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
+pub struct RespPullMessage {
+    pub topic: String,
+    pub messages: Vec<RespPullMsg>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct ReqMsgProduceNormal {
     pub topic: String,
     pub message: Vec<u8>,
@@ -232,6 +263,18 @@ pub struct ReqMsgConsumeAck {
 
 #[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 pub struct RespMsgConsumeAck {
+    pub id: u64,
+    pub status: MsgStatus,
+    pub msg: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
+pub struct ReqMsgConsumeAckMulti {
+    pub ids: Vec<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
+pub struct RespMsgConsumeAckMulti {
     pub id: u64,
     pub status: MsgStatus,
     pub msg: String,

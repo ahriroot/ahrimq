@@ -3,14 +3,17 @@ use std::{
     sync::Arc,
 };
 
-use tokio::sync::{mpsc::{self, Sender}, RwLock};
+use tokio::sync::{
+    mpsc::{self, Sender},
+    RwLock,
+};
 
 use amq::{
     message::{
         Message, MessageBox, MessageHistory, MessageStatus, MsgStatus, RespMsgConsume,
         RespMsgConsumeAck, RespMsgConsumerTopic, RespMsgProduceDelay, RespMsgProduceNormal,
         RespMsgPublish, RespMsgSubscribe, RespMsgSubscriber, RespMsgUnconsumerTopic,
-        RespMsgUnsubscriber, RespReconsumeLater,
+        RespMsgUnsubscriber, RespPullMessage, RespPullMsg, RespReconsumeLater,
     },
     utils,
 };
@@ -49,6 +52,11 @@ impl State {
             task_notifier: self.task_notifier.clone(),
             next_message_id: Arc::clone(&self.next_message_id),
         }
+    }
+
+    pub async fn get_all_topics(&self) -> Vec<String> {
+        let topics = self.subscribers.read().await;
+        topics.keys().cloned().collect()
     }
 
     pub async fn get_connection_id(&self) -> ConnectionId {
@@ -319,6 +327,66 @@ impl State {
         }
     }
 
+    pub async fn pull_message(&self, topic: String, total: u32) -> Vec<u8> {
+        let mut messages = self.messages.write().await;
+        let mut result = Vec::new();
+        let mut count = 0;
+        println!("pull_message: {:?}", messages);
+        let timestamp = utils::get_unix_timestamp();
+        for message in messages.iter_mut() {
+            if message.timestamp <= timestamp {
+                if message.status == MessageStatus::New
+                    || message.status == MessageStatus::Reconsume
+                {
+                    message.status = MessageStatus::Pending(0, timestamp, timestamp);
+                    if let Message::RespConsume(msg) = &message.message {
+                        if msg.topic == topic {
+                            result.push(RespPullMsg {
+                                id: message.id,
+                                message: msg.message.clone(),
+                            });
+                            count += 1;
+                            if count >= total {
+                                break;
+                            }
+                        }
+                    }
+                } else if let MessageStatus::Pending(times, _, first_send) = message.status {
+                    let interval = self.config.retry_interval * (times as u64 + 1);
+                    // 超时未收到确认
+                    if timestamp - first_send >= interval {
+                        if times >= self.config.retry_times {
+                            // 重试次数超限
+                            message.status = MessageStatus::Dead;
+                        } else {
+                            // 重新发送
+                            message.status =
+                                MessageStatus::Pending(times + 1, timestamp, first_send);
+                            if let Message::RespConsume(msg) = &message.message {
+                                if msg.topic == topic {
+                                    result.push(RespPullMsg {
+                                        id: message.id,
+                                        message: msg.message.clone(),
+                                    });
+                                    count += 1;
+                                    if count >= total {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Message::RespPullMessage(RespPullMessage {
+            topic: topic,
+            messages: result,
+        })
+        .serialize()
+        .unwrap()
+    }
+
     pub async fn produce_normal(&self, topic: String, message: Vec<u8>) -> Vec<u8> {
         {
             let mid = self.get_message_id().await;
@@ -448,6 +516,22 @@ impl State {
         .unwrap()
     }
 
+    pub async fn ack_message_multi(&self, ids: Vec<u64>) -> Vec<u8> {
+        let mut messages = self.messages.write().await;
+        for id in ids {
+            if let Some(message) = messages.iter_mut().find(|m| m.id == id) {
+                message.status = MessageStatus::Acked;
+            }
+        }
+        Message::RespConsumeAck(RespMsgConsumeAck {
+            id: 1,
+            status: MsgStatus::Success,
+            msg: "Ack messages successfully".to_string(),
+        })
+        .serialize()
+        .unwrap()
+    }
+
     pub async fn reconsume_message(&self, id: u64) -> Vec<u8> {
         let mut messages = self.messages.write().await;
         if let Some(message) = messages.iter_mut().find(|m| m.id == id) {
@@ -466,6 +550,7 @@ impl State {
 pub async fn interval(state: State, mut rx: mpsc::Receiver<()>) {
     tokio::spawn(async move {
         loop {
+            let all_topics = state.get_all_topics().await;
             let timestamp = utils::get_unix_timestamp();
             let mut next_timestamp = timestamp;
             let mut wati_to_send = Vec::new();
@@ -476,6 +561,16 @@ pub async fn interval(state: State, mut rx: mpsc::Receiver<()>) {
                     next_timestamp = timestamp + 10;
                 }
                 for message in messages.iter_mut() {
+                    match &message.message {
+                        Message::ReqConsume(msg) => {
+                            if !all_topics.contains(&msg.topic) {
+                                continue;
+                            }
+                        }
+                        _ => {
+                            continue;
+                        }
+                    }
                     match message.status {
                         // 新消息 或 重试消费
                         MessageStatus::New | MessageStatus::Reconsume => {

@@ -33,6 +33,8 @@ const (
 	TypeRespConsumerTopic    = "RespConsumerTopic"
 	TypeReqUnConsumer        = "ReqUnConsumer"
 	TypeRespUnConsumer       = "RespUnConsumer"
+	TypeReqPullMessage       = "ReqPullMessage"
+	TypeRespPullMessage      = "RespPullMessage"
 	TypeReqProduceNormal     = "ReqProduceNormal"
 	TypeReqProduceOrdered    = "ReqProduceOrdered"
 	TypeReqProduceDelay      = "ReqProduceDelay"
@@ -43,6 +45,8 @@ const (
 	TypeRespConsume          = "RespConsume"
 	TypeReqConsumeAck        = "ReqConsumeAck"
 	TypeRespConsumeAck       = "RespConsumeAck"
+	TypeReqConsumeAckMulti   = "ReqConsumeAckMulti"
+	TypeRespConsumeAckMulti  = "RespConsumeAckMulti"
 	TypeReqReconsumeLater    = "ReqReconsumeLater"
 	TypeRespReconsumeLater   = "RespReconsumeLater"
 	TypeError                = "Error"
@@ -168,6 +172,21 @@ type RespMsgUnConsumer struct {
 	Msg    string    `json:"msg"`
 }
 
+type ReqMsgPullMessage struct {
+	Topic string `json:"topic"`
+	Total uint32 `json:"total"`
+}
+
+type RespMsgPullMsg struct {
+	ID      uint64    `json:"id"`
+	Message ByteArray `json:"message"`
+}
+
+type RespMsgPullMessage struct {
+	Topic    string           `json:"topic"`
+	Messages []RespMsgPullMsg `json:"messages"`
+}
+
 // ReqMsgProduceNormal 普通生产请求
 type ReqMsgProduceNormal struct {
 	Topic   string    `json:"topic"`
@@ -234,6 +253,16 @@ type RespMsgConsumeAck struct {
 	Msg    string    `json:"msg"`
 }
 
+type ReqMsgConsumeAckMulti struct {
+	IDs []uint64 `json:"ids"`
+}
+
+type RespMsgConsumeAckMulti struct {
+	ID     uint64    `json:"id"`
+	Status MsgStatus `json:"status"`
+	Msg    string    `json:"msg"`
+}
+
 // ReqReconsumeLater 重试消费请求
 type ReqReconsumeLater struct {
 	ID uint64 `json:"id"`
@@ -283,6 +312,10 @@ func Serialize(msg interface{}) ([]byte, error) {
 		msgType = TypeReqUnConsumer
 	case RespMsgUnConsumer:
 		msgType = TypeRespUnConsumer
+	case ReqMsgPullMessage:
+		msgType = TypeReqPullMessage
+	case RespMsgPullMessage:
+		msgType = TypeRespPullMessage
 	case ReqMsgProduceNormal:
 		msgType = TypeReqProduceNormal
 	case RespMsgProduceNormal:
@@ -303,6 +336,10 @@ func Serialize(msg interface{}) ([]byte, error) {
 		msgType = TypeReqConsumeAck
 	case RespMsgConsumeAck:
 		msgType = TypeRespConsumeAck
+	case ReqMsgConsumeAckMulti:
+		msgType = TypeReqConsumeAckMulti
+	case RespMsgConsumeAckMulti:
+		msgType = TypeRespConsumeAckMulti
 	case ReqReconsumeLater:
 		msgType = TypeReqReconsumeLater
 	case RespReconsumeLater:
@@ -415,6 +452,14 @@ func Deserialize(data []byte) (string, interface{}, error) {
 		var resp RespMsgUnConsumer
 		err := json.Unmarshal(msg.Data, &resp)
 		return TypeRespUnConsumer, resp, err
+	case TypeReqPullMessage:
+		var req ReqMsgPullMessage
+		err := json.Unmarshal(msg.Data, &req)
+		return TypeReqPullMessage, req, err
+	case TypeRespPullMessage:
+		var resp RespMsgPullMessage
+		err := json.Unmarshal(msg.Data, &resp)
+		return TypeRespPullMessage, resp, err
 	case TypeReqProduceNormal:
 		var req ReqMsgProduceNormal
 		err := json.Unmarshal(msg.Data, &req)
@@ -455,6 +500,14 @@ func Deserialize(data []byte) (string, interface{}, error) {
 		var resp RespMsgConsumeAck
 		err := json.Unmarshal(msg.Data, &resp)
 		return TypeRespConsumeAck, resp, err
+	case TypeReqConsumeAckMulti:
+		var req ReqMsgConsumeAckMulti
+		err := json.Unmarshal(msg.Data, &req)
+		return TypeReqConsumeAckMulti, req, err
+	case TypeRespConsumeAckMulti:
+		var resp RespMsgConsumeAckMulti
+		err := json.Unmarshal(msg.Data, &resp)
+		return TypeRespConsumeAckMulti, resp, err
 	case TypeReqReconsumeLater:
 		var req ReqReconsumeLater
 		err := json.Unmarshal(msg.Data, &req)

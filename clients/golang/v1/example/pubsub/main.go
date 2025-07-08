@@ -8,12 +8,16 @@ import (
 )
 
 func main() {
-	amq := v1.NewAhrimq(v1.Config{
+	amq, err := v1.NewAhrimq(v1.Config{
 		Host: "127.0.0.1",
 		Port: 60001,
+		Mode: v1.Passive,
 	})
+	if err != nil {
+		panic(err)
+	}
 
-	err := amq.Connect()
+	err = amq.Connect()
 	if err != nil {
 		panic(err)
 	}

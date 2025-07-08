@@ -144,6 +144,12 @@ pub async fn handler(socket: TcpStream, state: State) {
                     Message::ReqUnconsumerTopic(req) => {
                         let _ = tx.send(state.remove_consumer(id, req.topic).await).await;
                     }
+                    // 拉取消息
+                    Message::ReqPullMessage(req) => {
+                        let _ = tx
+                            .send(state.pull_message(req.topic, req.total).await)
+                            .await;
+                    }
                     // 生产普通消息
                     Message::ReqProduceNormal(req) => {
                         let _ = tx
@@ -165,6 +171,9 @@ pub async fn handler(socket: TcpStream, state: State) {
                     // 确认消息被消费
                     Message::ReqConsumeAck(req) => {
                         let _ = tx.send(state.ack_message(req.id).await).await;
+                    }
+                    Message::ReqConsumeAckMulti(req) => {
+                        let _ = tx.send(state.ack_message_multi(req.ids).await).await;
                     }
                     Message::ReqReconsumeLater(req) => {
                         let _ = tx.send(state.reconsume_message(req.id).await).await;

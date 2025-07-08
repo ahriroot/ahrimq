@@ -24,18 +24,24 @@ const (
 
 type Callback func(message []byte) error
 
-func NewAhrimq(config Config) *Ahrimq {
-	return &Ahrimq{
+func NewAhrimq(config Config) (*Ahrimq, error) {
+	if config.Mode != Active && config.Mode != Passive {
+		return nil, fmt.Errorf("Invalid mode: %s", config.Mode)
+	}
+	client := &Ahrimq{
 		config:   config,
 		conn:     nil,
 		Channels: make(map[string]Callback),
+		Pending:  make(map[string]chan *RespMsgPullMessage),
 	}
+	return client, nil
 }
 
 type Ahrimq struct {
 	config   Config
 	conn     net.Conn
 	Channels map[string]Callback
+	Pending  map[string]chan *RespMsgPullMessage
 }
 
 func (a *Ahrimq) Connect(callback ...func(message interface{})) error {
@@ -92,9 +98,13 @@ func (a *Ahrimq) Connect(callback ...func(message interface{})) error {
 	// 之后一直等待数据，设置无超时
 	conn.SetReadDeadline(time.Time{})
 
+	if a.config.PingInterval < time.Second*5 {
+		a.config.PingInterval = time.Second * 5
+	}
+
 	go func() error {
 		for {
-			time.Sleep(5 * time.Second)
+			time.Sleep(a.config.PingInterval)
 			message := ReqMsgPing{}
 			messageBytes, err := Serialize(message)
 			if err != nil {
@@ -151,6 +161,17 @@ func (a *Ahrimq) Connect(callback ...func(message interface{})) error {
 						if errors.Is(result, ConsumeAck) {
 							a.Ack(resp.Topic, resp.ID)
 						}
+					}()
+				} else {
+					for _, cback := range callback {
+						go cback(msg)
+					}
+				}
+			case TypeRespPullMessage:
+				resp := msg.(RespMsgPullMessage)
+				if ch, ok := a.Pending[resp.Topic]; ok {
+					go func() {
+						ch <- &resp
 					}()
 				} else {
 					for _, cback := range callback {
@@ -275,6 +296,27 @@ func (a *Ahrimq) Ack(topic string, messageID uint64) error {
 	return nil
 }
 
+func (a *Ahrimq) AckMulti(topic string, messageIDs []uint64) error {
+	if a.conn == nil {
+		return fmt.Errorf("Not connected to server")
+	}
+	message := ReqMsgConsumeAckMulti{
+		IDs: messageIDs,
+	}
+	messageBytes, err := Serialize(message)
+	if err != nil {
+		return err
+	}
+	if err := binary.Write(a.conn, binary.BigEndian, uint32(len(messageBytes))); err != nil {
+		return err
+	}
+	_, err = a.conn.Write(messageBytes)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (a *Ahrimq) Reconsume(topic string, messageID uint64) error {
 	if a.conn == nil {
 		return fmt.Errorf("Not connected to server")
@@ -315,6 +357,39 @@ func (a *Ahrimq) Unconsume(topic string) error {
 		return err
 	}
 	return nil
+}
+
+func (a *Ahrimq) PullMessage(topic string, total uint32, timeout ...time.Duration) (*RespMsgPullMessage, error) {
+	if a.conn == nil {
+		return nil, fmt.Errorf("Not connected to server")
+	}
+	responseChan := make(chan *RespMsgPullMessage, 1)
+	a.Pending[topic] = responseChan
+	message := ReqMsgPullMessage{
+		Topic: topic,
+		Total: total,
+	}
+	messageBytes, err := Serialize(message)
+	if err != nil {
+		return nil, err
+	}
+	if err := binary.Write(a.conn, binary.BigEndian, uint32(len(messageBytes))); err != nil {
+		return nil, err
+	}
+	_, err = a.conn.Write(messageBytes)
+	if err != nil {
+		return nil, err
+	}
+	timeoutDuration := 5 * time.Second
+	if len(timeout) > 0 {
+		timeoutDuration = timeout[0]
+	}
+	select {
+	case resp := <-responseChan:
+		return resp, nil
+	case <-time.After(timeoutDuration):
+		return nil, errors.New("请求超时")
+	}
 }
 
 func (a *Ahrimq) ProduceNormal(topic string, content []byte) error {
