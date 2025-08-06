@@ -32,6 +32,8 @@ TYPE_REQ_CONSUMER_TOPIC = "ReqConsumerTopic"
 TYPE_RESP_CONSUMER_TOPIC = "RespConsumerTopic"
 TYPE_REQ_UN_CONSUMER = "ReqUnConsumer"
 TYPE_RESP_UN_CONSUMER = "RespUnConsumer"
+TYPE_REQ_PULL_MESSAGE = "ReqPullMessage"
+TYPE_RESP_PULL_MESSAGE = "RespPullMessage"
 TYPE_REQ_PRODUCE_NORMAL = "ReqProduceNormal"
 TYPE_REQ_PRODUCE_ORDERED = "ReqProduceOrdered"
 TYPE_REQ_PRODUCE_DELAY = "ReqProduceDelay"
@@ -325,6 +327,54 @@ class RespMsgUnConsumer:
         return cls(data["id"], MsgStatus(data["status"]), data["topic"], data["msg"])
 
 
+class ReqMsgPullMessage:
+    def __init__(self, topic: str, total: int):
+        self.topic = topic
+        self.total = total
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "topic": self.topic,
+            "total": self.total
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'ReqMsgPullMessage':
+        return cls(data["topic"], data["total"])
+
+
+class RespMsgPullMsg:
+    def __init__(self, id: int, message: ByteArray):
+        self.id = id
+        self.message = message
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "message": self.message.to_json()
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'RespMsgPullMsg':
+        return cls(data["id"], ByteArray(data["message"]))
+
+
+class RespMsgPullMessage:
+    def __init__(self, topic: str, messages: List[RespMsgPullMsg]):
+        self.topic = topic
+        self.messages = messages
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "topic": self.topic,
+            "messages": [msg.to_dict() for msg in self.messages]
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'RespMsgPullMessage':
+        return cls(data["topic"], [RespMsgPullMsg.from_dict(msg) for msg in data["messages"]])
+
+
 class ReqMsgProduceNormal:
     def __init__(self, topic: str, message: ByteArray):
         self.topic = topic
@@ -576,6 +626,10 @@ def serialize(msg: Any) -> bytes:
         msg_type = TYPE_REQ_UN_CONSUMER
     elif isinstance(msg, RespMsgUnConsumer):
         msg_type = TYPE_RESP_UN_CONSUMER
+    elif isinstance(msg, ReqMsgPullMessage):
+        msg_type = TYPE_REQ_PULL_MESSAGE
+    elif isinstance(msg, RespMsgPullMessage):
+        msg_type = TYPE_RESP_PULL_MESSAGE
     elif isinstance(msg, ReqMsgProduceNormal):
         msg_type = TYPE_REQ_PRODUCE_NORMAL
     elif isinstance(msg, RespMsgProduceNormal):
@@ -606,7 +660,7 @@ def serialize(msg: Any) -> bytes:
         raise ValueError(f"Unknown message type: {type(msg)}")
 
     # Serialize data
-    if hasattr(msg, 'to_dict'):
+    if hasattr(msg, 'to_dict') and not isinstance(msg, str):
         data = msg.to_dict()
     else:
         data = msg  # For simple types like str (error message)
@@ -659,6 +713,10 @@ def deserialize(data: bytes) -> Tuple[str, Any | str]:
         return msg.type, ReqMsgUnConsumer.from_dict(msg.data)
     elif msg.type == TYPE_RESP_UN_CONSUMER:
         return msg.type, RespMsgUnConsumer.from_dict(msg.data)
+    elif msg.type == TYPE_REQ_PULL_MESSAGE:
+        return msg.type, ReqMsgPullMessage.from_dict(msg.data)
+    elif msg.type == TYPE_RESP_PULL_MESSAGE:
+        return msg.type, RespMsgPullMessage.from_dict(msg.data)
     elif msg.type == TYPE_REQ_PRODUCE_NORMAL:
         return msg.type, ReqMsgProduceNormal.from_dict(msg.data)
     elif msg.type == TYPE_RESP_PRODUCE_NORMAL:

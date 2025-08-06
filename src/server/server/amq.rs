@@ -10,10 +10,12 @@ use tokio::{
 #[cfg(unix)]
 use tokio::net::UnixListener;
 
-use amq::message::{MessageBox, MessageStatus};
+use amq::{
+    message::{MessageBox, MessageStatus},
+    Config,
+};
 
 use crate::server::{
-    config,
     handler::handler,
     state::{interval, State},
 };
@@ -21,7 +23,7 @@ use crate::server::{
 pub async fn start(
     shutdown_receiver: oneshot::Receiver<()>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let config = config::Config::new().unwrap();
+    let config = Config::new().unwrap();
 
     let (tx, rx) = tokio::sync::mpsc::channel(32);
     let mut state = State {

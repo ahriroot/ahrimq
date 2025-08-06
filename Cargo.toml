@@ -1,6 +1,6 @@
 [package]
 name = "ahrimq"
-version = "0.0.4"
+version = "0.0.5"
 edition = "2021"
 rust-version = "1.85"
 authors = ["ahriknow <ahriknow@ahriknow.com>"]
@@ -9,12 +9,7 @@ license = "MIT"
 repository = "https://github.com/ahriroot/ahrimq"
 documentation = "https://github.com/ahriroot/ahrimq"
 readme = "README.md"
-keywords = [
-    "ahrimq",
-    "mq",
-    "message-queue",
-    "pubsub",
-]
+keywords = ["ahrimq", "mq", "message-queue", "pubsub"]
 categories = ["asynchronous", "network-programming", "database-implementations"]
 
 [[bin]]

@@ -44,6 +44,45 @@ pub enum MsgStatus {
     Error,
 }
 
+/// Message for Amq.
+///
+/// # Variants
+///
+/// - `ReqPing`: Request ping.
+/// - `RespPing`: Response ping.
+/// - `ReqAuthorizer`: Request authorizer.
+/// - `RespAuthorizer`: Response authorizer.
+/// - `ReqSubscribeTopic`: Request subscribe topic.
+/// - `RespSubscribeTopic`: Response subscribe topic.
+/// - `ReqUnsubscribeTopic`: Request unsubscribe topic.
+/// - `RespUnsubscribeTopic`: Response unsubscribe topic.
+/// - `ReqPublish`: Request publish message.
+/// - `RespPublish`: Response publish message.
+/// - `ReqSubscribe`: Request subscribe message.
+/// - `RespSubscribe`: Response subscribe message.
+/// - `ReqConsumerTopic`: Request consumer topic.
+/// - `RespConsumerTopic`: Response consumer topic.
+/// - `ReqUnconsumerTopic`: Request unconsumer topic.
+/// - `RespUnconsumerTopic`: Response unconsumer topic.
+/// - `ReqPullMessage`: Request pull message.
+/// - `RespPullMessage`: Response pull message.
+/// - `ReqProduceNormal`: Request produce normal message.
+/// - `ReqProduceOrdered`: Request produce ordered message.
+/// - `ReqProduceDelay`: Request produce delay message.
+/// - `RespProduceNormal`: Response produce normal message.
+/// - `RespProduceOrdered`: Response produce ordered message.
+/// - `RespProduceDelay`: Response produce delay message.
+/// - `ReqConsume`: Request consume message.
+/// - `RespConsume`: Response consume message.
+/// - `ReqConsumeAck`: Request consume ack message.
+/// - `RespConsumeAck`: Response consume ack message.
+/// - `ReqConsumeAckMulti`: Request consume ack multi message.
+/// - `RespConsumeAckMulti`: Response consume ack multi message.
+/// - `ReqReconsumeLater`: Request reconsume later message.
+/// - `RespReconsumeLater`: Response reconsume later message.
+/// - `Error`: Error message.
+/// - `ReqMessageList`: Request message list.
+/// - `RespMessageList`: Response message list.
 #[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 #[serde(tag = "type", content = "data")]
 pub enum Message {

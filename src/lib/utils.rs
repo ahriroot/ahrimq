@@ -5,7 +5,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-/// 获取当前 Unix 时间戳
+/// # Get current Unix timestamp
 pub fn get_unix_timestamp() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -13,7 +13,7 @@ pub fn get_unix_timestamp() -> u64 {
         .as_secs()
 }
 
-/// 解析配置文件路径并转换为绝对路径
+/// Convert the config file path to an absolute path.
 pub fn resolve_config_path(path: &str) -> Result<PathBuf, Box<dyn Error>> {
     let path = Path::new(path);
 
@@ -34,7 +34,7 @@ pub fn resolve_config_path(path: &str) -> Result<PathBuf, Box<dyn Error>> {
     Ok(abs_path)
 }
 
-/// 规范化路径，处理 `.` 和 `..`
+/// Convert the path normalization.
 pub fn normalize_path(path: &Path) -> PathBuf {
     let mut components = path.components();
     let mut normalized = PathBuf::new();

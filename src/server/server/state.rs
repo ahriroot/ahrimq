@@ -15,10 +15,8 @@ use amq::{
         RespMsgPublish, RespMsgSubscribe, RespMsgSubscriber, RespMsgUnconsumerTopic,
         RespMsgUnsubscriber, RespPullMessage, RespPullMsg, RespReconsumeLater,
     },
-    utils,
+    utils, Config,
 };
-
-use super::config::Config;
 
 type ConnectionId = u64;
 type TopicId = String;
