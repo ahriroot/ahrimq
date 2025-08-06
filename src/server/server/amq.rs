@@ -48,24 +48,22 @@ pub async fn start(
     interval(state.clone(), rx).await;
 
     #[cfg(unix)]
-    let path = config.get_unix_path();
+    {
+        let path = config.get_unix_path();
+        if path.is_empty() {
+            let addr = config.get_address();
+            let listener = TcpListener::bind(&addr).await?;
+            println!("Server running on {}", addr);
 
-    if path.is_empty() {
-        let addr = config.get_address();
-        let listener = TcpListener::bind(&addr).await?;
-        println!("Server running on {}", addr);
-
-        loop {
-            let (socket, _) = listener.accept().await?;
-            let s = state.clone();
-            let (reader, writer) = socket.into_split();
-            tokio::spawn(async move {
-                handler(reader, writer, s).await;
-            });
-        }
-    } else {
-        #[cfg(unix)]
-        {
+            loop {
+                let (socket, _) = listener.accept().await?;
+                let s = state.clone();
+                let (reader, writer) = socket.into_split();
+                tokio::spawn(async move {
+                    handler(reader, writer, s).await;
+                });
+            }
+        } else {
             if Path::new(&path).exists() {
                 std::fs::remove_file(&path)?;
             }
@@ -80,8 +78,23 @@ pub async fn start(
                     handler(reader, writer, s).await;
                 });
             }
+        };
+    }
+    #[cfg(not(unix))]
+    {
+        let addr = config.get_address();
+        let listener = TcpListener::bind(&addr).await?;
+        println!("Server running on {}", addr);
+
+        loop {
+            let (socket, _) = listener.accept().await?;
+            let s = state.clone();
+            let (reader, writer) = socket.into_split();
+            tokio::spawn(async move {
+                handler(reader, writer, s).await;
+            });
         }
-    };
+    }
 }
 
 async fn read_cache_file(state: &mut State) {

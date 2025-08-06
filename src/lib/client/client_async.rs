@@ -447,6 +447,7 @@ impl Client {
                     .await
                     .map_err(|e| AmqError::TcpReceiveError(e.to_string()))?;
             }
+            #[cfg(unix)]
             Some(Owh::Unix(writer)) => {
                 let message = &serde_json::to_vec(&msg)
                     .map_err(|e| AmqError::TcpSendDataError(e.to_string()))?;

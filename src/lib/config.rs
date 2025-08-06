@@ -1,8 +1,12 @@
-use std::{env, error::Error, ffi::OsString, path::Path};
+use std::{env, error::Error};
+#[cfg(unix)]
+use std::{ffi::OsString, path::Path};
 
 use serde::{Deserialize, Serialize};
 
-use crate::utils::{normalize_path, resolve_config_path};
+#[cfg(unix)]
+use crate::utils::normalize_path;
+use crate::utils::resolve_config_path;
 
 /// # Configuration.
 ///
