@@ -1,14 +1,16 @@
-use std::{error::Error, time::Duration};
+use std::{error::Error, sync::Arc, time::Duration};
 
 use amq::{error::AmqError, AsyncClient, Config};
-use tokio::{select, time::sleep};
+use tokio::{select, sync::Mutex, time::sleep};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let state = Arc::new(Mutex::new(0));
+
     loop {
         let config = Config::new().unwrap();
 
-        let mut client = AsyncClient::new(config);
+        let mut client = AsyncClient::new(config, state.clone());
 
         let rx = match client.connect().await {
             Ok(rx) => rx,
@@ -20,8 +22,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         };
 
         client
-            .subscribe("topic", |msg| async move {
-                println!("Received message: {:?}", msg);
+            .subscribe("topic", |state, msg| async move {
+                let mut state = state.lock().await;
+                *state += 1;
+                println!("Received message: {} {:?}", state, msg);
             })
             .await?;
 

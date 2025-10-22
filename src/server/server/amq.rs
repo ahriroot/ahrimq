@@ -130,7 +130,14 @@ async fn stop(state: State, shutdown_receiver: oneshot::Receiver<()>) {
         .expect("Failed to create cache directory");
 
     let cache_file = cache_dir.join("cache.akv");
-    let messages = state.messages.read().await.clone();
+    let messages: Vec<MessageBox> = state
+        .messages
+        .read()
+        .await
+        .iter()
+        .filter(|m| m.status != MessageStatus::Acked)
+        .cloned()
+        .collect();
     let config = standard().with_variable_int_encoding().with_little_endian();
     let encoded = bincode::encode_to_vec(&messages, config).unwrap();
     fs::write(cache_file, encoded)

@@ -29,15 +29,17 @@ use crate::{
     Config,
 };
 
-type OnRecvFn = Arc<dyn Fn(Vec<u8>) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
+type OnRecvFn<T> =
+    Arc<dyn Fn(Arc<T>, Vec<u8>) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 
 /// # Async Client
 ///
 /// ```rust
 /// loop {
 ///     let config = Config::new().unwrap();
+///     let state = Arc::new(Mutex::new(0));
 ///
-///     let mut client = AsyncClient::new(config);
+///     let mut client = AsyncClient::new(config, state.clone());
 ///
 ///     let rx = match client.connect().await {
 ///         Ok(rx) => rx,
@@ -46,11 +48,13 @@ type OnRecvFn = Arc<dyn Fn(Vec<u8>) -> Pin<Box<dyn Future<Output = ()> + Send>> 
 ///             sleep(Duration::from_secs(1)).await;
 ///             continue;
 ///         }
-/// };
+///     };
 ///
 ///     client
-///         .subscribe("topic", |msg| async move {
-///             println!("Received message: {:?}", msg);
+///         .subscribe("topic", |state, msg| async move {
+///             let mut state = state.lock().await;
+///             *state += 1;
+///             println!("Received message: {} {:?}", state, msg);
 ///         })
 ///         .await?;
 ///
@@ -94,12 +98,16 @@ type OnRecvFn = Arc<dyn Fn(Vec<u8>) -> Pin<Box<dyn Future<Output = ()> + Send>> 
 ///     println!("Reconnecting...");
 /// }
 /// ```
-pub struct Client {
+pub struct Client<T>
+where
+    T: Send + Sync + 'static,
+{
     config: Config,
+    state: Arc<T>,
     stream: Option<Owh>,
     recv_task: Option<JoinHandle<()>>,
-    on_subscribes: Arc<RwLock<HashMap<String, OnRecvFn>>>,
-    on_consumes: Arc<RwLock<HashMap<String, OnRecvFn>>>,
+    on_subscribes: Arc<RwLock<HashMap<String, OnRecvFn<T>>>>,
+    on_consumes: Arc<RwLock<HashMap<String, OnRecvFn<T>>>>,
 }
 
 enum Owh {
@@ -108,11 +116,15 @@ enum Owh {
     Unix(UnixOWH),
 }
 
-impl Client {
+impl<T> Client<T>
+where
+    T: Send + Sync + 'static,
+{
     /// # Create a new async client. (tokio)
-    pub fn new(config: Config) -> Self {
+    pub fn new(config: Config, state: Arc<T>) -> Self {
         Self {
             config,
+            state,
             stream: None,
             recv_task: None,
             on_subscribes: Arc::new(RwLock::new(HashMap::new())),
@@ -129,13 +141,15 @@ impl Client {
     /// ```
     pub async fn subscribe<F, Fut>(&mut self, topic: &str, f: F) -> Result<(), AmqError>
     where
-        F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
+        F: Fn(Arc<T>, Vec<u8>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = ()> + Send + 'static,
     {
+        let handler: OnRecvFn<T> =
+            Arc::new(move |state: Arc<T>, data: Vec<u8>| Box::pin(f(state, data)));
         self.on_subscribes
             .write()
             .await
-            .insert(topic.to_string(), Arc::new(move |data| Box::pin(f(data))));
+            .insert(topic.to_string(), handler);
         let message = Message::ReqSubscribeTopic(ReqMsgSubscriber {
             topic: topic.to_string(),
         });
@@ -180,13 +194,15 @@ impl Client {
     /// ```
     pub async fn consume<F, Fut>(&mut self, topic: &str, f: F) -> Result<(), AmqError>
     where
-        F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
+        F: Fn(Arc<T>, Vec<u8>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = ()> + Send + 'static,
     {
+        let handler: OnRecvFn<T> =
+            Arc::new(move |state: Arc<T>, data: Vec<u8>| Box::pin(f(state, data)));
         self.on_consumes
             .write()
             .await
-            .insert(topic.to_string(), Arc::new(move |data| Box::pin(f(data))));
+            .insert(topic.to_string(), handler);
         let message = Message::ReqConsumerTopic(ReqMsgConsumerTopic {
             topic: topic.to_string(),
         });
@@ -287,6 +303,7 @@ impl Client {
 
         let on_subscribes = self.on_subscribes.clone();
         let on_consumes = self.on_consumes.clone();
+        let state = Arc::clone(&self.state);
         let recv_task = spawn(async move {
             loop {
                 // Read mesage header (4 bytes)
@@ -314,12 +331,12 @@ impl Client {
                         match &msg {
                             Message::RespSubscribe(RespMsgSubscribe { topic, message, .. }) => {
                                 if let Some(cb) = on_subscribes.read().await.get(topic) {
-                                    cb(message.clone()).await;
+                                    cb(Arc::clone(&state), message.clone()).await;
                                 }
                             }
                             Message::RespConsume(RespMsgConsume { topic, message, .. }) => {
                                 if let Some(cb) = on_consumes.read().await.get(topic) {
-                                    cb(message.clone()).await;
+                                    cb(Arc::clone(&state), message.clone()).await;
                                 }
                             }
                             _ => {}
@@ -376,6 +393,7 @@ impl Client {
 
         let on_subscribes = self.on_subscribes.clone();
         let on_consumes = self.on_consumes.clone();
+        let state = Arc::clone(&self.state);
         let recv_task = spawn(async move {
             loop {
                 // Read mesage header (4 bytes)
@@ -403,12 +421,12 @@ impl Client {
                         match &msg {
                             Message::RespSubscribe(RespMsgSubscribe { topic, message, .. }) => {
                                 if let Some(cb) = on_subscribes.read().await.get(topic) {
-                                    cb(message.clone()).await;
+                                    cb(Arc::clone(&state), message.clone()).await;
                                 }
                             }
                             Message::RespConsume(RespMsgConsume { topic, message, .. }) => {
                                 if let Some(cb) = on_consumes.read().await.get(topic) {
-                                    cb(message.clone()).await;
+                                    cb(Arc::clone(&state), message.clone()).await;
                                 }
                             }
                             _ => {}

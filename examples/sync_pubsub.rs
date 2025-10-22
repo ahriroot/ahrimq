@@ -1,13 +1,20 @@
-use std::{error::Error, sync::mpsc::TryRecvError, thread::sleep, time::Duration};
+use std::{
+    error::Error,
+    sync::{mpsc::TryRecvError, Arc, Mutex},
+    thread::sleep,
+    time::Duration,
+};
 
 use amq::{error::AmqError, Config, SyncClient};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let state = Arc::new(Mutex::new(0));
+
     loop {
         let config = Config::new().unwrap();
 
-        let mut client = SyncClient::new(config);
+        let mut client = SyncClient::new(config, state.clone());
 
         let rx = match client.connect() {
             Ok(rx) => rx,
@@ -18,8 +25,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
         };
 
-        client.subscribe("topic", |msg| {
-            println!("Received message: {:?}", msg);
+        client.subscribe("topic", |state, msg| {
+            let mut state = state.lock().unwrap();
+            *state += 1;
+            println!("Received message: {} {:?}", state, msg);
         })?;
 
         let should_exit;

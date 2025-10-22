@@ -23,15 +23,16 @@ use crate::{
     Config,
 };
 
-type OnRecvFn = Arc<dyn Fn(Vec<u8>) + Send + Sync>;
+type OnRecvFn<T> = Arc<dyn Fn(Arc<T>, Vec<u8>) + Send + Sync>;
 
 /// # Sync Client
 ///
 /// ```rust
 /// loop {
 ///     let config = Config::new().unwrap();
+///     let state = Arc::new(Mutex::new(0));
 ///
-///     let mut client = SyncClient::new(config);
+///     let mut client = SyncClient::new(config, state.clone());
 ///
 ///     let rx = match client.connect() {
 ///         Ok(rx) => rx,
@@ -42,7 +43,9 @@ type OnRecvFn = Arc<dyn Fn(Vec<u8>) + Send + Sync>;
 ///         }
 ///     };
 ///
-///     client.subscribe("topic", |msg| {
+///     client.subscribe("topic", |state, msg| {
+///         let mut state = state.lock().unwrap();
+///         *state += 1;
 ///         println!("Received message: {:?}", msg);
 ///     })?;
 ///
@@ -78,12 +81,16 @@ type OnRecvFn = Arc<dyn Fn(Vec<u8>) + Send + Sync>;
 ///     println!("Reconnecting...");
 /// }
 /// ```
-pub struct Client {
+pub struct Client<T>
+where
+    T: Send + Sync + 'static,
+{
     config: Config,
+    state: Arc<T>,
     stream: Option<Stream>,
     recv_thread: Option<JoinHandle<()>>,
-    on_subscribes: Arc<RwLock<HashMap<String, OnRecvFn>>>,
-    on_consumes: Arc<RwLock<HashMap<String, OnRecvFn>>>,
+    on_subscribes: Arc<RwLock<HashMap<String, OnRecvFn<T>>>>,
+    on_consumes: Arc<RwLock<HashMap<String, OnRecvFn<T>>>>,
 }
 
 enum Stream {
@@ -92,11 +99,15 @@ enum Stream {
     UnixStream(UnixStream),
 }
 
-impl Client {
+impl<T> Client<T>
+where
+    T: Send + Sync + 'static,
+{
     /// # Create a new client.
-    pub fn new(config: Config) -> Self {
+    pub fn new(config: Config, state: Arc<T>) -> Self {
         Self {
             config,
+            state,
             stream: None,
             recv_thread: None,
             on_subscribes: Arc::new(RwLock::new(HashMap::new())),
@@ -113,12 +124,13 @@ impl Client {
     /// ```
     pub fn subscribe<F>(&mut self, topic: &str, f: F) -> Result<(), AmqError>
     where
-        F: Fn(Vec<u8>) + Send + Sync + 'static,
+        F: Fn(Arc<T>, Vec<u8>) + Send + Sync + 'static,
     {
+        let handler: OnRecvFn<T> = Arc::new(f);
         self.on_subscribes
             .write()
             .unwrap()
-            .insert(topic.to_string(), Arc::new(f));
+            .insert(topic.to_string(), handler);
         let message = Message::ReqSubscribeTopic(ReqMsgSubscriber {
             topic: topic.to_string(),
         });
@@ -162,12 +174,13 @@ impl Client {
     /// ```
     pub fn consume<F>(&mut self, topic: &str, f: F) -> Result<(), AmqError>
     where
-        F: Fn(Vec<u8>) + Send + Sync + 'static,
+        F: Fn(Arc<T>, Vec<u8>) + Send + Sync + 'static,
     {
+        let handler: OnRecvFn<T> = Arc::new(f);
         self.on_consumes
             .write()
             .unwrap()
-            .insert(topic.to_string(), Arc::new(f));
+            .insert(topic.to_string(), handler);
         let message = Message::ReqConsumerTopic(ReqMsgConsumerTopic {
             topic: topic.to_string(),
         });
@@ -272,6 +285,7 @@ impl Client {
 
         let on_subscribes = self.on_subscribes.clone();
         let on_consumes = self.on_consumes.clone();
+        let state = Arc::clone(&self.state);
         let recv_thread = spawn(move || {
             let mut reader = reader_stream;
             loop {
@@ -302,12 +316,12 @@ impl Client {
                         match &msg {
                             Message::RespSubscribe(RespMsgSubscribe { topic, message, .. }) => {
                                 if let Some(cb) = on_subscribes.read().unwrap().get(topic) {
-                                    cb(message.clone());
+                                    cb(Arc::clone(&state), message.clone());
                                 }
                             }
                             Message::RespConsume(RespMsgConsume { topic, message, .. }) => {
                                 if let Some(cb) = on_consumes.read().unwrap().get(topic) {
-                                    cb(message.clone());
+                                    cb(Arc::clone(&state), message.clone());
                                 }
                             }
                             _ => {}
@@ -369,6 +383,7 @@ impl Client {
 
         let on_subscribes = self.on_subscribes.clone();
         let on_consumes = self.on_consumes.clone();
+        let state = Arc::clone(&self.state);
         let recv_thread = spawn(move || {
             let mut reader = reader_stream;
             loop {
@@ -399,12 +414,12 @@ impl Client {
                         match &msg {
                             Message::RespSubscribe(RespMsgSubscribe { topic, message, .. }) => {
                                 if let Some(cb) = on_subscribes.read().unwrap().get(topic) {
-                                    cb(message.clone());
+                                    cb(Arc::clone(&state), message.clone());
                                 }
                             }
                             Message::RespConsume(RespMsgConsume { topic, message, .. }) => {
                                 if let Some(cb) = on_consumes.read().unwrap().get(topic) {
-                                    cb(message.clone());
+                                    cb(Arc::clone(&state), message.clone());
                                 }
                             }
                             _ => {}
