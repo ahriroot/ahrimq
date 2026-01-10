@@ -65,6 +65,28 @@ cargo build --release
 
 - [Golang](./clients/golang/v1/example)
 
+### Auto Reconnection
+
+The Golang client now supports automatic reconnection when the server goes down:
+
+```go
+config := v1.NewConfig()
+config.ReconnectInterval = 5 * time.Second  // Retry every 5 seconds
+config.MaxReconnectAttempts = 0           // 0 = infinite retries
+
+client, _ := v1.NewAhrimq(config)
+client.Connect(func(msg interface{}) {
+    // Handle messages
+})
+```
+
+When AhriMQ server goes down:
+- ✅ Client automatically reconnects
+- ✅ Backend continues running
+- ✅ No service interruption
+
+For detailed usage, see [RECONNECT.md](./clients/golang/v1/RECONNECT.md).
+
 ## Features
 
 - **Sub and Pub**: Support for publishing and subscribing to messages.

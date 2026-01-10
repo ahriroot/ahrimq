@@ -24,6 +24,8 @@ type Config struct {
 	AccessSecret string
 	Mode         Mode
 	PingInterval time.Duration
+	ReconnectInterval time.Duration
+	MaxReconnectAttempts int
 }
 
 func NewConfig() *Config {
@@ -35,6 +37,8 @@ func NewConfig() *Config {
 		AccessSecret: "",
 		Mode:         Active,
 		PingInterval: 60 * time.Second,
+		ReconnectInterval: 5 * time.Second,
+		MaxReconnectAttempts: 0,
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"runtime"
+	"sync"
 	"time"
 )
 
@@ -29,23 +30,35 @@ func NewAhrimq(config Config) (*Ahrimq, error) {
 	if config.Mode != Active && config.Mode != Passive {
 		config.Mode = Active
 	}
+	if config.PingInterval == 0 {
+		config.PingInterval = 60 * time.Second
+	}
+	if config.ReconnectInterval == 0 {
+		config.ReconnectInterval = 5 * time.Second
+	}
 	client := &Ahrimq{
-		config:   config,
-		conn:     nil,
-		Channels: make(map[string]Callback),
-		Pending:  make(map[string]chan *RespMsgPullMessage),
+		config:         config,
+		conn:           nil,
+		connMu:         sync.RWMutex{},
+		Channels:       make(map[string]Callback),
+		Pending:        make(map[string]chan *RespMsgPullMessage),
+		running:        false,
+		reconnectCount: 0,
 	}
 	return client, nil
 }
 
 type Ahrimq struct {
-	config   Config
-	conn     net.Conn
-	Channels map[string]Callback
-	Pending  map[string]chan *RespMsgPullMessage
+	config         Config
+	conn           net.Conn
+	connMu         sync.RWMutex
+	Channels       map[string]Callback
+	Pending        map[string]chan *RespMsgPullMessage
+	running        bool
+	reconnectCount int
 }
 
-func (a *Ahrimq) Connect(callback ...func(message interface{})) error {
+func (a *Ahrimq) dial() error {
 	path := a.config.GetUnixPath()
 	if path == "" {
 		addr := a.config.GetAddress()
@@ -53,7 +66,9 @@ func (a *Ahrimq) Connect(callback ...func(message interface{})) error {
 		if err != nil {
 			return err
 		}
+		a.connMu.Lock()
 		a.conn = conn
+		a.connMu.Unlock()
 	} else {
 		if runtime.GOOS == "windows" {
 			return fmt.Errorf("Unix socket not supported on Windows")
@@ -62,9 +77,14 @@ func (a *Ahrimq) Connect(callback ...func(message interface{})) error {
 		if err != nil {
 			return err
 		}
+		a.connMu.Lock()
 		a.conn = conn
+		a.connMu.Unlock()
 	}
+	return nil
+}
 
+func (a *Ahrimq) authenticate() error {
 	req := ReqMsgAuthorizer{
 		AccessKey:    a.config.AccessKey,
 		AccessSecret: a.config.AccessSecret,
@@ -73,25 +93,28 @@ func (a *Ahrimq) Connect(callback ...func(message interface{})) error {
 	if err != nil {
 		return err
 	}
-	if err := binary.Write(a.conn, binary.BigEndian, uint32(len(messageBytes))); err != nil {
+
+	a.connMu.RLock()
+	conn := a.conn
+	a.connMu.RUnlock()
+
+	if err := binary.Write(conn, binary.BigEndian, uint32(len(messageBytes))); err != nil {
 		return err
 	}
-	_, err = a.conn.Write(messageBytes)
+	_, err = conn.Write(messageBytes)
 	if err != nil {
 		return err
 	}
 
-	// 设置第一次读取的超时时间为5秒
-	a.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 
 	var respLen uint32
-	if err := binary.Read(a.conn, binary.BigEndian, &respLen); err != nil {
+	if err := binary.Read(conn, binary.BigEndian, &respLen); err != nil {
 		return err
 	}
 
-	// 3. 读取响应数据
 	message := make([]byte, respLen)
-	if _, err := a.conn.Read(message); err != nil {
+	if _, err := conn.Read(message); err != nil {
 		return err
 	}
 
@@ -108,96 +131,196 @@ func (a *Ahrimq) Connect(callback ...func(message interface{})) error {
 		return ErrInvalidAccessKeyOrSecret
 	}
 
-	// 之后一直等待数据，设置无超时
-	a.conn.SetReadDeadline(time.Time{})
+	conn.SetReadDeadline(time.Time{})
+	return nil
+}
+
+func (a *Ahrimq) startPingLoop() {
+	for a.running {
+		time.Sleep(a.config.PingInterval)
+
+		a.connMu.RLock()
+		conn := a.conn
+		a.connMu.RUnlock()
+
+		if conn == nil {
+			continue
+		}
+
+		message := ReqMsgPing{}
+		messageBytes, err := Serialize(message)
+		if err != nil {
+			log.Printf("Failed to serialize ping: %v", err)
+			a.handleDisconnect()
+			continue
+		}
+		if err := binary.Write(conn, binary.BigEndian, uint32(len(messageBytes))); err != nil {
+			log.Printf("Failed to send ping: %v", err)
+			a.handleDisconnect()
+			continue
+		}
+		_, err = conn.Write(messageBytes)
+		if err != nil {
+			log.Printf("Failed to write ping: %v", err)
+			a.handleDisconnect()
+			continue
+		}
+	}
+}
+
+func (a *Ahrimq) startMessageReceiver(callback ...func(message interface{})) {
+	for a.running {
+		a.connMu.RLock()
+		conn := a.conn
+		a.connMu.RUnlock()
+
+		if conn == nil {
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+
+		var respLen uint32
+		if err := binary.Read(conn, binary.BigEndian, &respLen); err != nil {
+			log.Printf("Read length error: %v", err)
+			a.handleDisconnect()
+			continue
+		}
+
+		message := make([]byte, respLen)
+		if _, err := conn.Read(message); err != nil {
+			log.Printf("Read data error: %v", err)
+			a.handleDisconnect()
+			continue
+		}
+
+		t, msg, err := Deserialize(message)
+		if err != nil {
+			log.Printf("Deserialize error: %v", err)
+			continue
+		}
+
+		switch t {
+		case TypeRespPing:
+		case TypeRespSubscribe:
+			resp := msg.(RespMsgSubscribe)
+			if cb, ok := a.Channels[resp.Topic]; ok {
+				go func() {
+					result := cb(resp.Message)
+					_ = result
+				}()
+			} else {
+				for _, cback := range callback {
+					go cback(msg)
+				}
+			}
+		case TypeRespConsume:
+			resp := msg.(RespMsgConsume)
+			if cb, ok := a.Channels[resp.Topic]; ok {
+				go func() {
+					result := cb(resp.Message)
+					if errors.Is(result, ConsumeAck) {
+						a.Ack(resp.Topic, resp.ID)
+					}
+				}()
+			} else {
+				for _, cback := range callback {
+					go cback(msg)
+				}
+			}
+		case TypeRespPullMessage:
+			resp := msg.(RespMsgPullMessage)
+			if ch, ok := a.Pending[resp.Topic]; ok {
+				go func() {
+					ch <- &resp
+				}()
+			} else {
+				for _, cback := range callback {
+					go cback(msg)
+				}
+			}
+		default:
+			for _, cback := range callback {
+				go cback(msg)
+			}
+		}
+	}
+}
+
+func (a *Ahrimq) handleDisconnect() {
+	a.connMu.Lock()
+	if a.conn != nil {
+		a.conn.Close()
+		a.conn = nil
+	}
+	a.connMu.Unlock()
+
+	a.reconnectCount++
+	if a.config.MaxReconnectAttempts > 0 && a.reconnectCount >= a.config.MaxReconnectAttempts {
+		log.Printf("Max reconnection attempts (%d) reached, stopping", a.config.MaxReconnectAttempts)
+		a.running = false
+		return
+	}
+
+	log.Printf("Connection lost, attempting to reconnect... (attempt %d)", a.reconnectCount)
+
+	for a.running {
+		time.Sleep(a.config.ReconnectInterval)
+		if !a.running {
+			break
+		}
+
+		if err := a.dial(); err != nil {
+			log.Printf("Reconnection failed: %v, retrying in %v...", err, a.config.ReconnectInterval)
+			continue
+		}
+
+		if err := a.authenticate(); err != nil {
+			log.Printf("Authentication failed: %v, retrying...", err)
+			a.connMu.Lock()
+			if a.conn != nil {
+				a.conn.Close()
+				a.conn = nil
+			}
+			a.connMu.Unlock()
+			continue
+		}
+
+		log.Printf("Successfully reconnected after %d attempts", a.reconnectCount)
+		a.reconnectCount = 0
+		break
+	}
+}
+
+func (a *Ahrimq) Connect(callback ...func(message interface{})) error {
+	a.running = true
+	a.reconnectCount = 0
+
+	if err := a.dial(); err != nil {
+		return fmt.Errorf("Failed to connect: %w", err)
+	}
+
+	if err := a.authenticate(); err != nil {
+		return fmt.Errorf("Failed to authenticate: %w", err)
+	}
 
 	if a.config.PingInterval < time.Second*5 {
 		a.config.PingInterval = time.Second * 5
 	}
 
-	go func() error {
-		for {
-			time.Sleep(a.config.PingInterval)
-			message := ReqMsgPing{}
-			messageBytes, err := Serialize(message)
-			if err != nil {
-				break
-			}
-			if err := binary.Write(a.conn, binary.BigEndian, uint32(len(messageBytes))); err != nil {
-				break
-			}
-			_, err = a.conn.Write(messageBytes)
-			if err != nil {
-				break
-			}
-		}
-		return nil
-	}()
+	go a.startPingLoop()
+	go a.startMessageReceiver(callback...)
 
-	go func() {
-		for {
-			var respLen uint32
-			if err := binary.Read(a.conn, binary.BigEndian, &respLen); err != nil {
-				log.Fatal("Read length error: ", err)
-			}
-
-			// 3. 读取响应数据
-			message := make([]byte, respLen)
-			if _, err := a.conn.Read(message); err != nil {
-				log.Fatal("Read data error: ", err)
-			}
-
-			t, msg, err := Deserialize(message)
-			if err != nil {
-				break
-			}
-			switch t {
-			case TypeRespPing:
-			case TypeRespSubscribe:
-				resp := msg.(RespMsgSubscribe)
-				if cb, ok := a.Channels[resp.Topic]; ok {
-					go func() {
-						result := cb(resp.Message)
-						_ = result
-					}()
-				} else {
-					for _, cback := range callback {
-						go cback(msg)
-					}
-				}
-			case TypeRespConsume:
-				resp := msg.(RespMsgConsume)
-				if cb, ok := a.Channels[resp.Topic]; ok {
-					go func() {
-						result := cb(resp.Message)
-						if errors.Is(result, ConsumeAck) {
-							a.Ack(resp.Topic, resp.ID)
-						}
-					}()
-				} else {
-					for _, cback := range callback {
-						go cback(msg)
-					}
-				}
-			case TypeRespPullMessage:
-				resp := msg.(RespMsgPullMessage)
-				if ch, ok := a.Pending[resp.Topic]; ok {
-					go func() {
-						ch <- &resp
-					}()
-				} else {
-					for _, cback := range callback {
-						go cback(msg)
-					}
-				}
-			default:
-				for _, cback := range callback {
-					go cback(msg)
-				}
-			}
-		}
-	}()
 	return nil
+}
+
+func (a *Ahrimq) Close() {
+	a.running = false
+	a.connMu.Lock()
+	if a.conn != nil {
+		a.conn.Close()
+		a.conn = nil
+	}
+	a.connMu.Unlock()
 }
 
 func (a *Ahrimq) Subscribe(topic string, callback Callback) error {
