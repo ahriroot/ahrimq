@@ -1,8 +1,6 @@
-use std::{collections::HashMap, env, ffi::OsString, path::Path, sync::Arc};
+use std::{collections::HashMap, path::Path, sync::Arc};
 
-use bincode::config::standard;
 use tokio::{
-    fs,
     net::TcpListener,
     sync::{oneshot, RwLock},
 };
@@ -11,7 +9,7 @@ use tokio::{
 use tokio::net::UnixListener;
 
 use amq::{
-    message::{MessageBox, MessageStatus},
+    persistence::PersistenceEngine,
     Config,
 };
 
@@ -36,9 +34,32 @@ pub async fn start(
         messages: Arc::new(RwLock::new(Vec::new())),
         task_notifier: tx,
         next_message_id: Arc::new(RwLock::new(0)),
+        persistence: None,
     };
 
-    read_cache_file(&mut state).await;
+    let persistence: Option<PersistenceEngine> = match PersistenceEngine::new(amq::PersistenceConfig::default()).await {
+        Ok(p) => Some(p),
+        Err(e) => {
+            eprintln!("Failed to initialize persistence engine: {}, using in-memory mode", e);
+            None
+        }
+    };
+
+    if let Some(ref persistence) = persistence {
+        match persistence.recover().await {
+            Ok((messages, next_message_id, next_connection_id)) => {
+                let mut state_messages = state.messages.write().await;
+                *state_messages = messages;
+                *state.next_message_id.write().await = next_message_id;
+                *state.next_connection_id.write().await = next_connection_id;
+            }
+            Err(e) => {
+                eprintln!("Failed to recover from persistence: {}", e);
+            }
+        }
+    }
+
+    state.persistence = persistence;
 
     let sstop = state.clone();
     tokio::spawn(async move {
@@ -97,52 +118,23 @@ pub async fn start(
     }
 }
 
-async fn read_cache_file(state: &mut State) {
-    let config = standard().with_variable_int_encoding().with_little_endian();
-
-    let home_dir = env::var_os("HOME")
-        .or_else(|| env::var_os("USERPROFILE")) // Windows 兼容
-        .unwrap_or(OsString::from("./"));
-    let cache_dir = Path::new(&home_dir).join(".ahriknow/ahrimq");
-    let cache_file = cache_dir.join("cache.akv");
-    if cache_file.exists() {
-        let encoded = fs::read(cache_file).await.unwrap();
-        let msgs: Vec<MessageBox> = bincode::decode_from_slice(&encoded, config).unwrap().0;
-
-        let mut messages = state.messages.write().await;
-        *messages = msgs
-            .iter()
-            .filter(|m| m.status != MessageStatus::Acked)
-            .cloned()
-            .collect();
-    }
-}
-
 async fn stop(state: State, shutdown_receiver: oneshot::Receiver<()>) {
     let _ = shutdown_receiver.await;
 
-    let home_dir = env::var_os("HOME")
-        .or_else(|| env::var_os("USERPROFILE")) // Windows 兼容
-        .unwrap_or(OsString::from("./"));
-    let cache_dir = Path::new(&home_dir).join(".ahriknow/ahrimq");
-    fs::create_dir_all(&cache_dir)
-        .await
-        .expect("Failed to create cache directory");
+    if let Some(ref persistence) = state.persistence {
+        let messages = state.messages.read().await;
+        let next_message_id = *state.next_message_id.read().await;
+        let next_connection_id = *state.next_connection_id.read().await;
 
-    let cache_file = cache_dir.join("cache.akv");
-    let messages: Vec<MessageBox> = state
-        .messages
-        .read()
-        .await
-        .iter()
-        .filter(|m| m.status != MessageStatus::Acked)
-        .cloned()
-        .collect();
-    let config = standard().with_variable_int_encoding().with_little_endian();
-    let encoded = bincode::encode_to_vec(&messages, config).unwrap();
-    fs::write(cache_file, encoded)
-        .await
-        .expect("Failed to write cache file");
+        if let Err(e) = persistence
+            .create_snapshot(&messages, next_message_id, next_connection_id)
+            .await
+        {
+            eprintln!("Failed to create snapshot: {}", e);
+        }
+
+        let _ = persistence.shutdown().await;
+    }
 
     std::process::exit(0);
 }

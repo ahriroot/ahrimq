@@ -138,7 +138,6 @@ func (a *Ahrimq) Connect(callback ...func(message interface{})) error {
 		for {
 			var respLen uint32
 			if err := binary.Read(a.conn, binary.BigEndian, &respLen); err != nil {
-				fmt.Println("Read error: ", err)
 				log.Fatal("Read length error: ", err)
 			}
 

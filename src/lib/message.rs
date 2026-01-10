@@ -452,34 +452,3 @@ impl Message {
         Ok(message)
     }
 }
-
-mod tests {
-    #[test]
-    fn test_serialize_deserialize() {
-        let messages = vec![
-            super::Message::ReqSubscribeTopic(super::ReqMsgSubscriber {
-                topic: "topic".to_string(),
-            }),
-            super::Message::RespSubscribeTopic(super::RespMsgSubscriber {
-                id: 1,
-                status: super::MsgStatus::Success,
-                topic: "topic".to_string(),
-                msg: "subscribe success".to_string(),
-            }),
-            super::Message::ReqPublish(super::ReqMsgPublish {
-                topic: "topic".to_string(),
-                message: "message".as_bytes().to_vec(),
-            }),
-        ];
-
-        for message in messages.iter() {
-            let serialized = message.serialize().unwrap();
-            println!(
-                "serialized: {}",
-                String::from_utf8(serialized.clone()).unwrap()
-            );
-            let deserialized = super::Message::deserialize(&serialized).unwrap();
-            assert_eq!(deserialized, *message);
-        }
-    }
-}

@@ -15,6 +15,7 @@ use amq::{
         RespMsgPublish, RespMsgSubscribe, RespMsgSubscriber, RespMsgUnconsumerTopic,
         RespMsgUnsubscriber, RespPullMessage, RespPullMsg, RespReconsumeLater,
     },
+    persistence::PersistenceEngine,
     utils, Config,
 };
 
@@ -35,6 +36,7 @@ pub struct State {
     pub messages: Messages,
     pub task_notifier: Sender<()>,
     pub next_message_id: Arc<RwLock<u64>>,
+    pub persistence: Option<PersistenceEngine>,
 }
 
 impl State {
@@ -49,11 +51,12 @@ impl State {
             messages: Arc::clone(&self.messages),
             task_notifier: self.task_notifier.clone(),
             next_message_id: Arc::clone(&self.next_message_id),
+            persistence: self.persistence.as_ref().map(|p| p.clone()),
         }
     }
 
     pub async fn get_all_topics(&self) -> Vec<String> {
-        let topics = self.subscribers.read().await;
+        let topics = self.consumers.read().await;
         topics.keys().cloned().collect()
     }
 
@@ -329,7 +332,6 @@ impl State {
         let mut messages = self.messages.write().await;
         let mut result = Vec::new();
         let mut count = 0;
-        println!("pull_message: {:?}", messages);
         let timestamp = utils::get_unix_timestamp();
         for message in messages.iter_mut() {
             if message.timestamp <= timestamp {
@@ -386,10 +388,10 @@ impl State {
     }
 
     pub async fn produce_normal(&self, topic: String, message: Vec<u8>) -> Vec<u8> {
-        {
+        let msg_box = {
             let mid = self.get_message_id().await;
             let mut messages = self.messages.write().await;
-            messages.push(MessageBox {
+            let msg_box = MessageBox {
                 id: mid,
                 status: MessageStatus::New,
                 timestamp: 0,
@@ -402,8 +404,15 @@ impl State {
                     status: MessageStatus::New,
                     timestamp: utils::get_unix_timestamp(),
                 }],
-            });
+            };
+            messages.push(msg_box.clone());
+            msg_box
+        };
+
+        if let Some(ref persistence) = self.persistence {
+            let _ = persistence.append_message(&msg_box).await;
         }
+
         self.task_notifier.send(()).await.unwrap();
         Message::RespProduceNormal(RespMsgProduceNormal {
             id: 1,
@@ -416,10 +425,10 @@ impl State {
     }
 
     pub async fn produce_ordered(&self, topic: String, message: Vec<u8>) -> Vec<u8> {
-        {
+        let msg_box = {
             let mid = self.get_message_id().await;
             let mut messages = self.messages.write().await;
-            messages.push(MessageBox {
+            let msg_box = MessageBox {
                 id: mid,
                 status: MessageStatus::New,
                 timestamp: 0,
@@ -432,8 +441,15 @@ impl State {
                     status: MessageStatus::New,
                     timestamp: utils::get_unix_timestamp(),
                 }],
-            });
+            };
+            messages.push(msg_box.clone());
+            msg_box
+        };
+
+        if let Some(ref persistence) = self.persistence {
+            let _ = persistence.append_message(&msg_box).await;
         }
+
         self.task_notifier.send(()).await.unwrap();
         Message::RespProduceNormal(RespMsgProduceNormal {
             id: 1,
@@ -446,10 +462,10 @@ impl State {
     }
 
     pub async fn produce_delay(&self, topic: String, message: Vec<u8>, delay: u64) -> Vec<u8> {
-        {
+        let msg_box = {
             let mid = self.get_message_id().await;
             let mut messages = self.messages.write().await;
-            messages.push(MessageBox {
+            let msg_box = MessageBox {
                 id: mid,
                 status: MessageStatus::New,
                 timestamp: utils::get_unix_timestamp() + delay,
@@ -462,8 +478,15 @@ impl State {
                     status: MessageStatus::New,
                     timestamp: utils::get_unix_timestamp(),
                 }],
-            });
+            };
+            messages.push(msg_box.clone());
+            msg_box
+        };
+
+        if let Some(ref persistence) = self.persistence {
+            let _ = persistence.append_message(&msg_box).await;
         }
+
         self.task_notifier.send(()).await.unwrap();
         Message::RespProduceDelay(RespMsgProduceDelay {
             id: 1,
@@ -504,6 +527,12 @@ impl State {
         let mut messages = self.messages.write().await;
         if let Some(message) = messages.iter_mut().find(|m| m.id == id) {
             message.status = MessageStatus::Acked;
+
+            if let Some(ref persistence) = self.persistence {
+                let _ = persistence
+                    .update_message_status(id, MessageStatus::Acked)
+                    .await;
+            }
         }
         Message::RespConsumeAck(RespMsgConsumeAck {
             id: 1,
@@ -516,11 +545,20 @@ impl State {
 
     pub async fn ack_message_multi(&self, ids: Vec<u64>) -> Vec<u8> {
         let mut messages = self.messages.write().await;
-        for id in ids {
-            if let Some(message) = messages.iter_mut().find(|m| m.id == id) {
+        for id in &ids {
+            if let Some(message) = messages.iter_mut().find(|m| m.id == *id) {
                 message.status = MessageStatus::Acked;
             }
         }
+
+        if let Some(ref persistence) = self.persistence {
+            for id in ids {
+                let _ = persistence
+                    .update_message_status(id, MessageStatus::Acked)
+                    .await;
+            }
+        }
+
         Message::RespConsumeAck(RespMsgConsumeAck {
             id: 1,
             status: MsgStatus::Success,
@@ -560,7 +598,7 @@ pub async fn interval(state: State, mut rx: mpsc::Receiver<()>) {
                 }
                 for message in messages.iter_mut() {
                     match &message.message {
-                        Message::ReqConsume(msg) => {
+                        Message::RespConsume(msg) => {
                             if !all_topics.contains(&msg.topic) {
                                 continue;
                             }
