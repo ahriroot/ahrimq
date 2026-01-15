@@ -118,6 +118,8 @@ pub enum Message {
     RespConsumeAckMulti(RespMsgConsumeAckMulti),
     ReqReconsumeLater(ReqReconsumeLater),
     RespReconsumeLater(RespReconsumeLater),
+    ReqReconsumeDelay(ReqReconsumeDelay),
+    RespReconsumeDelay(RespReconsumeDelay),
     Error(String),
     ReqMessageList(ReqMsgList),
     RespMessageList(RespMsgList),
@@ -329,6 +331,20 @@ pub struct RespReconsumeLater {
     pub id: u64,
     pub status: MsgStatus,
     pub msg: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
+pub struct ReqReconsumeDelay {
+    pub id: u64,
+    pub delay: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
+pub struct RespReconsumeDelay {
+    pub id: u64,
+    pub status: MsgStatus,
+    pub msg: String,
+    pub delay: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]

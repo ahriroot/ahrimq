@@ -72,6 +72,16 @@ impl PersistenceEngine {
             .await
     }
 
+    pub async fn update_message_timestamp(
+        &self,
+        id: u64,
+        timestamp: u64,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.wal_manager
+            .append(WalEntry::UpdateTimestamp { id, timestamp })
+            .await
+    }
+
     pub async fn remove_message(&self, id: u64) -> Result<(), Box<dyn std::error::Error>> {
         self.wal_manager.append(WalEntry::RemoveMessage(id)).await
     }
@@ -106,7 +116,6 @@ impl PersistenceEngine {
         }
 
         let wal_entries = self.wal_manager.recover().await?;
-
         for entry in wal_entries {
             match entry {
                 WalEntry::AddMessage(msg) => {
@@ -124,6 +133,11 @@ impl PersistenceEngine {
                 }
                 WalEntry::RemoveMessage(id) => {
                     messages.retain(|m| m.id != id);
+                }
+                WalEntry::UpdateTimestamp { id, timestamp } => {
+                    if let Some(msg) = messages.iter_mut().find(|m| m.id == id) {
+                        msg.timestamp = timestamp;
+                    }
                 }
             }
         }

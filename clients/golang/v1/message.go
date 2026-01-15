@@ -49,6 +49,8 @@ const (
 	TypeRespConsumeAckMulti  = "RespConsumeAckMulti"
 	TypeReqReconsumeLater    = "ReqReconsumeLater"
 	TypeRespReconsumeLater   = "RespReconsumeLater"
+	TypeReqReconsumeDelay    = "ReqReconsumeDelay"
+	TypeRespReconsumeDelay   = "RespReconsumeDelay"
 	TypeError                = "Error"
 )
 
@@ -275,6 +277,20 @@ type RespReconsumeLater struct {
 	Msg    string    `json:"msg"`
 }
 
+// ReqReconsumeDelay 延迟重试消费请求
+type ReqReconsumeDelay struct {
+	ID    uint64 `json:"id"`
+	Delay uint64 `json:"delay"`
+}
+
+// RespReconsumeDelay 延迟重试消费响应
+type RespReconsumeDelay struct {
+	ID     uint64    `json:"id"`
+	Status MsgStatus `json:"status"`
+	Msg    string    `json:"msg"`
+	Delay  uint64    `json:"delay"`
+}
+
 // SerializeMessage 序列化消息为JSON
 func Serialize(msg interface{}) ([]byte, error) {
 	// 获取消息类型
@@ -344,6 +360,10 @@ func Serialize(msg interface{}) ([]byte, error) {
 		msgType = TypeReqReconsumeLater
 	case RespReconsumeLater:
 		msgType = TypeRespReconsumeLater
+	case ReqReconsumeDelay:
+		msgType = TypeReqReconsumeDelay
+	case RespReconsumeDelay:
+		msgType = TypeRespReconsumeDelay
 	case string: // Error 类型
 		msgType = TypeError
 	default:
@@ -516,6 +536,14 @@ func Deserialize(data []byte) (string, interface{}, error) {
 		var resp RespReconsumeLater
 		err := json.Unmarshal(msg.Data, &resp)
 		return TypeRespReconsumeLater, resp, err
+	case TypeReqReconsumeDelay:
+		var req ReqReconsumeDelay
+		err := json.Unmarshal(msg.Data, &req)
+		return TypeReqReconsumeDelay, req, err
+	case TypeRespReconsumeDelay:
+		var resp RespReconsumeDelay
+		err := json.Unmarshal(msg.Data, &resp)
+		return TypeRespReconsumeDelay, resp, err
 	case TypeError:
 		var errMsg string
 		err := json.Unmarshal(msg.Data, &errMsg)

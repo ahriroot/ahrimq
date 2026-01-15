@@ -27,6 +27,7 @@ pub enum WalEntry {
     UpdateStatus { id: u64, status: MessageStatus },
     AddHistory { id: u64, history: MessageHistory },
     RemoveMessage(u64),
+    UpdateTimestamp { id: u64, timestamp: u64 },
 }
 
 impl WalEntry {

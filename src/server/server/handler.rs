@@ -178,6 +178,9 @@ where
                     Message::ReqReconsumeLater(req) => {
                         let _ = tx.send(state.reconsume_message(req.id).await).await;
                     }
+                    Message::ReqReconsumeDelay(req) => {
+                        let _ = tx.send(state.reconsume_delay_message(req.id, req.delay).await).await;
+                    }
                     _ => {
                         let _ = tx
                             .send(

@@ -46,6 +46,8 @@ TYPE_REQ_CONSUME_ACK = "ReqConsumeAck"
 TYPE_RESP_CONSUME_ACK = "RespConsumeAck"
 TYPE_REQ_RECONSUME_LATER = "ReqReconsumeLater"
 TYPE_RESP_RECONSUME_LATER = "RespReconsumeLater"
+TYPE_REQ_RECONSUME_DELAY = "ReqReconsumeDelay"
+TYPE_RESP_RECONSUME_DELAY = "RespReconsumeDelay"
 TYPE_ERROR = "Error"
 
 
@@ -582,6 +584,40 @@ class RespReconsumeLater:
     def from_dict(cls, data: Dict[str, Any]) -> 'RespReconsumeLater':
         return cls(data["id"], MsgStatus(data["status"]), data["msg"])
 
+class ReqReconsumeDelay:
+    def __init__(self, id: int, delay: int):
+        self.id = id
+        self.delay = delay
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "delay": self.delay
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'ReqReconsumeDelay':
+        return cls(data["id"], data["delay"])
+
+class RespReconsumeDelay:
+    def __init__(self, id: int, status: MsgStatus, msg: str, delay: int):
+        self.id = id
+        self.status = status
+        self.msg = msg
+        self.delay = delay
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "status": self.status.value,
+            "msg": self.msg,
+            "delay": self.delay
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'RespReconsumeDelay':
+        return cls(data["id"], MsgStatus(data["status"]), data["msg"], data["delay"])
+
 
 # 自定义编码函数
 def custom_encoder(obj):
@@ -654,6 +690,10 @@ def serialize(msg: Any) -> bytes:
         msg_type = TYPE_REQ_RECONSUME_LATER
     elif isinstance(msg, RespReconsumeLater):
         msg_type = TYPE_RESP_RECONSUME_LATER
+    elif isinstance(msg, ReqReconsumeDelay):
+        msg_type = TYPE_REQ_RECONSUME_DELAY
+    elif isinstance(msg, RespReconsumeDelay):
+        msg_type = TYPE_RESP_RECONSUME_DELAY
     elif isinstance(msg, str):
         msg_type = TYPE_ERROR
     else:
@@ -741,6 +781,10 @@ def deserialize(data: bytes) -> Tuple[str, Any | str]:
         return msg.type, ReqReconsumeLater.from_dict(msg.data)
     elif msg.type == TYPE_RESP_RECONSUME_LATER:
         return msg.type, RespReconsumeLater.from_dict(msg.data)
+    elif msg.type == TYPE_REQ_RECONSUME_DELAY:
+        return msg.type, ReqReconsumeDelay.from_dict(msg.data)
+    elif msg.type == TYPE_RESP_RECONSUME_DELAY:
+        return msg.type, RespReconsumeDelay.from_dict(msg.data)
     elif msg.type == TYPE_ERROR:
         return msg.type, msg.data
     else:

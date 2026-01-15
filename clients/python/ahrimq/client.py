@@ -6,7 +6,12 @@ import time
 from typing import Any, Callable, Dict
 
 from .config import Config
-from .message import TYPE_REQ_PING, TYPE_RESP_AUTHORIZER, TYPE_RESP_PING, TYPE_RESP_SUBSCRIBE, ByteArray, MsgStatus, ReqMsgAuthorizer, ReqMsgPing, ReqMsgPublish, ReqMsgSubscriber, ReqMsgUnsubscriber, RespMsgSubscribe, deserialize, serialize
+from .message import (
+    TYPE_REQ_PING, TYPE_RESP_AUTHORIZER, TYPE_RESP_PING, TYPE_RESP_SUBSCRIBE,
+    ByteArray, MsgStatus, ReqMsgAuthorizer, ReqMsgPing, ReqMsgPublish,
+    ReqMsgSubscriber, ReqMsgUnsubscriber, RespMsgSubscribe, deserialize, serialize,
+    ReqReconsumeDelay, RespReconsumeDelay
+)
 
 
 class Ahrimq:
@@ -187,4 +192,13 @@ class Ahrimq:
         :param message: Message to publish.
         """
         message = ReqMsgPublish(topic=topic, message=ByteArray(message))
+        self._send_message(message)
+
+    def reconsume_delay(self, message_id: int, delay: int) -> None:
+        """
+        Reconsume a message with delay.
+        :param message_id: Message ID.
+        :param delay: Delay in seconds.
+        """
+        message = ReqReconsumeDelay(id=message_id, delay=delay)
         self._send_message(message)

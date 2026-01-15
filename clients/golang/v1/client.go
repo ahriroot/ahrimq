@@ -473,6 +473,28 @@ func (a *Ahrimq) Reconsume(topic string, messageID uint64) error {
 	return nil
 }
 
+func (a *Ahrimq) ReconsumeDelay(topic string, messageID uint64, delay uint64) error {
+	if a.conn == nil {
+		return fmt.Errorf("Not connected to server")
+	}
+	message := ReqReconsumeDelay{
+		ID:    messageID,
+		Delay: delay,
+	}
+	messageBytes, err := Serialize(message)
+	if err != nil {
+		return err
+	}
+	if err := binary.Write(a.conn, binary.BigEndian, uint32(len(messageBytes))); err != nil {
+		return err
+	}
+	_, err = a.conn.Write(messageBytes)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (a *Ahrimq) Unconsume(topic string) error {
 	if a.conn == nil {
 		return fmt.Errorf("Not connected to server")

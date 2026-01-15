@@ -13,7 +13,7 @@ use amq::{
         Message, MessageBox, MessageHistory, MessageStatus, MsgStatus, RespMsgConsume,
         RespMsgConsumeAck, RespMsgConsumerTopic, RespMsgProduceDelay, RespMsgProduceNormal,
         RespMsgPublish, RespMsgSubscribe, RespMsgSubscriber, RespMsgUnconsumerTopic,
-        RespMsgUnsubscriber, RespPullMessage, RespPullMsg, RespReconsumeLater,
+        RespMsgUnsubscriber, RespPullMessage, RespPullMsg, RespReconsumeDelay, RespReconsumeLater,
     },
     persistence::PersistenceEngine,
     utils, Config,
@@ -333,12 +333,15 @@ impl State {
         let mut result = Vec::new();
         let mut count = 0;
         let timestamp = utils::get_unix_timestamp();
+        let mut status_updates = Vec::new();
+
         for message in messages.iter_mut() {
             if message.timestamp <= timestamp {
                 if message.status == MessageStatus::New
                     || message.status == MessageStatus::Reconsume
                 {
                     message.status = MessageStatus::Pending(0, timestamp, timestamp);
+                    status_updates.push((message.id, message.status.clone()));
                     if let Message::RespConsume(msg) = &message.message {
                         if msg.topic == topic {
                             result.push(RespPullMsg {
@@ -353,15 +356,14 @@ impl State {
                     }
                 } else if let MessageStatus::Pending(times, _, first_send) = message.status {
                     let interval = self.config.retry_interval * (times as u64 + 1);
-                    // 超时未收到确认
                     if timestamp - first_send >= interval {
                         if times >= self.config.retry_times {
-                            // 重试次数超限
                             message.status = MessageStatus::Dead;
+                            status_updates.push((message.id, message.status.clone()));
                         } else {
-                            // 重新发送
                             message.status =
                                 MessageStatus::Pending(times + 1, timestamp, first_send);
+                            status_updates.push((message.id, message.status.clone()));
                             if let Message::RespConsume(msg) = &message.message {
                                 if msg.topic == topic {
                                     result.push(RespPullMsg {
@@ -379,6 +381,13 @@ impl State {
                 }
             }
         }
+
+        if let Some(ref persistence) = self.persistence {
+            for (id, status) in status_updates {
+                let _ = persistence.update_message_status(id, status).await;
+            }
+        }
+
         Message::RespPullMessage(RespPullMessage {
             topic: topic,
             messages: result,
@@ -572,7 +581,14 @@ impl State {
         let mut messages = self.messages.write().await;
         if let Some(message) = messages.iter_mut().find(|m| m.id == id) {
             message.status = MessageStatus::Reconsume;
+
+            if let Some(ref persistence) = self.persistence {
+                let _ = persistence
+                    .update_message_status(id, MessageStatus::Reconsume)
+                    .await;
+            }
         }
+
         Message::RespReconsumeLater(RespReconsumeLater {
             id: 1,
             status: MsgStatus::Success,
@@ -580,6 +596,50 @@ impl State {
         })
         .serialize()
         .unwrap()
+    }
+
+    pub async fn reconsume_delay_message(&self, id: u64, delay: u64) -> Vec<u8> {
+        let mut messages = self.messages.write().await;
+        if let Some(message) = messages.iter_mut().find(|m| m.id == id) {
+            message.status = MessageStatus::Reconsume;
+            message.timestamp = utils::get_unix_timestamp() + delay;
+
+            if let Some(ref persistence) = self.persistence {
+                let _ = persistence
+                    .update_message_status(id, MessageStatus::Reconsume)
+                    .await;
+
+                let _ = persistence
+                    .update_message_timestamp(id, message.timestamp)
+                    .await;
+            }
+        }
+
+        Message::RespReconsumeDelay(RespReconsumeDelay {
+            id: 1,
+            status: MsgStatus::Success,
+            msg: "Reconsume delay message successfully".to_string(),
+            delay: delay,
+        })
+        .serialize()
+        .unwrap()
+    }
+
+    async fn cleanup_messages(&self, ids_to_ack: Vec<u64>) {
+        if ids_to_ack.is_empty() {
+            return;
+        }
+
+        let ids_set: HashSet<u64> = ids_to_ack.iter().cloned().collect();
+
+        let mut messages = self.messages.write().await;
+        messages.retain(|m| !ids_set.contains(&m.id));
+
+        if let Some(ref persistence) = self.persistence {
+            for id in ids_to_ack {
+                let _ = persistence.remove_message(id).await;
+            }
+        }
     }
 }
 
@@ -589,8 +649,9 @@ pub async fn interval(state: State, mut rx: mpsc::Receiver<()>) {
             let all_topics = state.get_all_topics().await;
             let timestamp = utils::get_unix_timestamp();
             let mut next_timestamp = timestamp;
-            let mut wati_to_send = Vec::new();
-            let mut wati_to_ack = Vec::new();
+            let mut wait_to_send = Vec::new();
+            let mut wait_to_ack = Vec::new();
+            let mut status_updates = Vec::new();
             {
                 let mut messages = state.messages.write().await;
                 if messages.len() == 0 {
@@ -608,56 +669,60 @@ pub async fn interval(state: State, mut rx: mpsc::Receiver<()>) {
                         }
                     }
                     match message.status {
-                        // 新消息 或 重试消费
                         MessageStatus::New | MessageStatus::Reconsume => {
                             if message.timestamp <= timestamp {
                                 message.status = MessageStatus::Pending(0, timestamp, timestamp);
-                                wati_to_send.push(message.clone());
+                                wait_to_send.push(message.clone());
+                                status_updates.push((message.id, message.status.clone()));
                             } else {
-                                // 查询最近的下个消息到达时间
-                                if message.timestamp < next_timestamp || next_timestamp == timestamp
-                                {
+                                if message.timestamp < next_timestamp {
                                     next_timestamp = message.timestamp;
                                 }
                             }
                         }
-                        // 处理中消息
                         MessageStatus::Pending(times, _, first_send) => {
                             let interval = state.config.retry_interval * (times as u64 + 1);
-                            // 超时未收到确认
                             if timestamp - first_send >= interval {
                                 if times >= state.config.retry_times {
-                                    // 重试次数超限
                                     message.status = MessageStatus::Dead;
+                                    status_updates.push((message.id, message.status.clone()));
                                 } else {
-                                    // 重新发送
                                     message.status =
                                         MessageStatus::Pending(times + 1, timestamp, first_send);
-                                    wati_to_send.push(message.clone());
+                                    wait_to_send.push(message.clone());
+                                    status_updates.push((message.id, message.status.clone()));
                                 }
                             }
                         }
-                        // 死亡消息
                         MessageStatus::Dead => {}
-                        // 已确认消费的消息
                         MessageStatus::Acked => {
-                            wati_to_ack.push(message.id);
+                            wait_to_ack.push(message.id);
                         }
                     }
                 }
-                for message in wati_to_send {
-                    state.consume(message.message).await;
-                }
-                for id in wati_to_ack {
-                    messages.retain(|m| m.id != id);
+            }
+
+            for message in wait_to_send {
+                state.consume(message.message).await;
+            }
+
+            state.cleanup_messages(wait_to_ack).await;
+
+            if let Some(ref persistence) = state.persistence {
+                for (id, status) in status_updates {
+                    let _ = persistence.update_message_status(id, status).await;
                 }
             }
+
+            let sleep_duration = if next_timestamp > timestamp {
+                next_timestamp - timestamp + 1
+            } else {
+                1
+            };
+
             tokio::select! {
-                _ = tokio::time::sleep(tokio::time::Duration::from_secs(next_timestamp - timestamp + 1)) => {
-                    // 等到下个消息到期时间
-                }
+                _ = tokio::time::sleep(tokio::time::Duration::from_secs(sleep_duration)) => {}
                 _ = rx.recv() => {
-                    // 有新的消息
                     continue;
                 }
             }
