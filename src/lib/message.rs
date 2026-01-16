@@ -83,6 +83,8 @@ pub enum MsgStatus {
 /// - `Error`: Error message.
 /// - `ReqMessageList`: Request message list.
 /// - `RespMessageList`: Response message list.
+/// - `ReqConnectionList`: Request connection list.
+/// - `ReqTopicList`: Request topic list.
 #[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]
 #[serde(tag = "type", content = "data")]
 pub enum Message {
@@ -123,6 +125,8 @@ pub enum Message {
     Error(String),
     ReqMessageList(ReqMsgList),
     RespMessageList(RespMsgList),
+    ReqConnectionList(()),
+    ReqTopicList(()),
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode)]

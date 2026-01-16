@@ -181,6 +181,29 @@ where
                     Message::ReqReconsumeDelay(req) => {
                         let _ = tx.send(state.reconsume_delay_message(req.id, req.delay).await).await;
                     }
+                    Message::ReqMessageList(req) => {
+                        let _ = tx.send(state.get_messages(req.topic, req.page_size, req.page_num).await).await;
+                    }
+                    Message::ReqConnectionList(_) => {
+                        let _ = tx.send(state.get_connections_info().await).await;
+                    }
+                    Message::ReqTopicList(_) => {
+                        let _ = tx.send(state.get_topics_info().await).await;
+                    }
+                    Message::ReqAuthorizer(_) => {
+                        // 已经授权，返回成功
+                        let _ = tx
+                            .send(
+                                Message::RespAuthorizer(RespMsgAuthorizer {
+                                    id: 0,
+                                    status: MsgStatus::Success,
+                                    msg: "Already authorized".to_string(),
+                                })
+                                .serialize()
+                                .unwrap(),
+                            )
+                            .await;
+                    }
                     _ => {
                         let _ = tx
                             .send(

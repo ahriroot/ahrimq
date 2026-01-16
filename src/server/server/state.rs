@@ -11,9 +11,10 @@ use tokio::sync::{
 use amq::{
     message::{
         Message, MessageBox, MessageHistory, MessageStatus, MsgStatus, RespMsgConsume,
-        RespMsgConsumeAck, RespMsgConsumerTopic, RespMsgProduceDelay, RespMsgProduceNormal,
-        RespMsgPublish, RespMsgSubscribe, RespMsgSubscriber, RespMsgUnconsumerTopic,
-        RespMsgUnsubscriber, RespPullMessage, RespPullMsg, RespReconsumeDelay, RespReconsumeLater,
+        RespMsgConsumeAck, RespMsgConsumerTopic, RespMsgList, RespMsgProduceDelay, 
+        RespMsgProduceNormal, RespMsgPublish, RespMsgSubscribe, RespMsgSubscriber, 
+        RespMsgUnconsumerTopic, RespMsgUnsubscriber, RespPullMessage, RespPullMsg, 
+        RespReconsumeDelay, RespReconsumeLater,
     },
     persistence::PersistenceEngine,
     utils, Config,
@@ -58,6 +59,80 @@ impl State {
     pub async fn get_all_topics(&self) -> Vec<String> {
         let topics = self.consumers.read().await;
         topics.keys().cloned().collect()
+    }
+
+    pub async fn get_messages(&self, topic: String, page_size: u32, page_num: u32) -> Vec<u8> {
+        let messages = self.messages.read().await;
+        
+        let filtered_messages: Vec<&MessageBox> = messages.iter()
+            .filter(|msg_box| {
+                match &msg_box.message {
+                    Message::ReqProduceNormal(req) => req.topic == topic,
+                    Message::ReqProduceOrdered(req) => req.topic == topic,
+                    Message::ReqProduceDelay(req) => req.topic == topic,
+                    _ => false,
+                }
+            })
+            .collect();
+        
+        let total = filtered_messages.len();
+        let offset = (page_num - 1) as usize * page_size as usize;
+        let end = std::cmp::min(offset + page_size as usize, total);
+        let paginated_messages: Vec<MessageBox> = filtered_messages[offset..end]
+            .iter()
+            .cloned()
+            .cloned()
+            .collect();
+        
+        Message::RespMessageList(RespMsgList {
+            id: 1,
+            status: MsgStatus::Success,
+            topic: topic,
+            message_list: paginated_messages,
+        })
+        .serialize()
+        .unwrap()
+    }
+
+    pub async fn get_connections_info(&self) -> Vec<u8> {
+        let connections = self.connections.read().await;
+        let connection_count = connections.len();
+        
+        let msg = format!("Total connections: {}", connection_count);
+        
+        Message::RespAuthorizer(amq::message::RespMsgAuthorizer {
+            id: 0,
+            status: MsgStatus::Success,
+            msg: msg,
+        })
+        .serialize()
+        .unwrap()
+    }
+
+    pub async fn get_topics_info(&self) -> Vec<u8> {
+        let topics = self.consumers.read().await;
+        let subscribers = self.subscribers.read().await;
+        
+        let mut topics_info = Vec::new();
+        for topic in topics.keys() {
+            let consumer_count = topics.get(topic).map(|c| c.len()).unwrap_or(0);
+            let subscriber_count = subscribers.get(topic).map(|s| s.len()).unwrap_or(0);
+            topics_info.push(format!("Topic: {}, Consumers: {}, Subscribers: {}", topic, consumer_count, subscriber_count));
+        }
+        
+        let msg = if topics_info.is_empty() {
+            "No topics available".to_string()
+        } else {
+            topics_info.join("\n")
+        };
+        
+        Message::RespAuthorizer(amq::message::RespMsgAuthorizer {
+            id: 0,
+            status: MsgStatus::Success,
+            msg: msg,
+        })
+        .serialize()
+        .unwrap()
     }
 
     pub async fn get_connection_id(&self) -> ConnectionId {
